@@ -2,31 +2,45 @@ import React, { useMemo, useState } from "react";
 import { LayoutGrid, Plus, Trash2 } from "lucide-react";
 import Field from "./Field.jsx";
 import Section from "./Section.jsx";
-import { calculateRoomLosses, gKV, gKP } from "../../utils/dtrMath";
-import { CLIMATE_ZONES, WILAYAS } from "../../data/algeria_climate.js";
+import { calculateRoomLosses } from "../../utils/dtrMath";
+import { CLIMATE_ZONES, WILAYAS } from "./algeria_climate.js";
+import {
+  PRESETS_MURS,
+  PRESETS_TOITURES,
+  PRESETS_PLANCHERS,
+  VITRAGE_OPTS,
+  LAME_OPTS,
+  CADRE_OPTS,
+  MATERIAU_OPTS,
+  gKV,
+  gKP,
+} from "./dtrMaterials.js";
 
 const genId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 const TABS = [
   { id: "vertical", label: "Vertical Elements (Murs & Baies)" },
-  { id: "roof", label: "Roofing (Toiture)" },
-  { id: "floor", label: "Flooring (Plancher Bas)" },
+  { id: "roof",     label: "Roofing (Toiture)" },
+  { id: "floor",    label: "Flooring (Plancher Bas)" },
 ];
 
 const VERTICAL_TYPES = ["Mur Extérieur", "Mur Intérieur (LNC)", "Fenêtre", "Porte", "Porte-Fenêtre"];
-const ROOF_TYPES = ["Toiture Terrasse", "Toiture Tuiles", "Plafond sous LNC"];
-const FLOOR_TYPES = ["Sur Terre-Plein", "Sur Vide Sanitaire", "Sur Sous-Sol", "Étage Intermédiaire"];
-const CONTACT_OPTIONS = [{ value: "EXT", label: "Extérieur" }, { value: "LNC", label: "Local Non Chauffé (LNC)" }];
+const ROOF_TYPES     = ["Toiture Terrasse", "Toiture Tuiles", "Plafond sous LNC"];
+const FLOOR_TYPES    = ["Sur Terre-Plein", "Sur Vide Sanitaire", "Sur Sous-Sol", "Étage Intermédiaire"];
+const CONTACT_OPTIONS = [
+  { value: "EXT", label: "Extérieur" },
+  { value: "LNC", label: "Local Non Chauffé (LNC)" },
+];
 const ORIENTATIONS = ["N", "S", "E", "W", "NE", "SE", "SW", "NW"];
 
-// DTR 5.2.1 / 5.3 Types d'isolation au sol
+// DTR 5.2.1 / 5.3 — floor-insulation types
 const ISO_TYPES = [
-  { val: "sans_iso",       label: "Sans isolation" },
-  { val: "iso_perimetre",  label: "Isol. périphérique horiz." },
-  { val: "iso_surface",    label: "Isol. totale (surface)" },
-  { val: "iso_peri_mur",   label: "Isol. péri. + mur enterré" },
-  { val: "iso_surface_mur",label: "Isol. totale + mur enterré" },
-  { val: "mur_enterre",    label: "Mur enterré (Table 5.8)" },
+  { val: "sans_iso",        label: "Sans isolation" },
+  { val: "iso_perimetre",   label: "Isol. périphérique horiz." },
+  { val: "iso_surface",     label: "Isol. totale (surface)" },
+  { val: "iso_peri_mur",    label: "Isol. péri. + mur enterré" },
+  { val: "iso_surface_mur", label: "Isol. totale + mur enterré" },
+  { val: "mur_enterre",     label: "Mur enterré (Table 5.8)" },
 ];
 
 const PSI_PRESETS = [
@@ -37,54 +51,38 @@ const PSI_PRESETS = [
   { val: "0.60", label: "Plancher Interm. (0.60)" },
 ];
 
-// ── Smart Material Presets — DTR C3.2 Annexe A.2 + Exemples III.6/III.7 ──────
-const PRESETS_MURS = [
-  { val: "brique_double",     label: "Double paroi brique (10+air+10) [DTR]",    u: 1.28 },
-  { val: "brique_double_iso", label: "Double brique + Isolant 5cm [Ex. III.6]",  u: 0.66 },
-  { val: "brique_simple",     label: "Mur simple brique creuse (10cm)",           u: 2.38 },
-  { val: "beton_20",          label: "Voile en Béton Armé (20cm) [DTR A.2]",     u: 3.57 },
-  { val: "manuel",            label: "Personnalisé (Saisie Manuelle U)",          u: ""   },
-];
-const PRESETS_TOITURES = [
-  { val: "terrasse_iso", label: "Toiture Terrasse Isolée (8cm) [Ex. III.7]",     u: 0.48 },
-  { val: "dalle_pleine", label: "Dalle Pleine Béton (20cm) non isolée",           u: 3.57 },
-  { val: "tuiles",       label: "Toiture en Tuiles [DTR]",                        u: 2.50 },
-  { val: "manuel",       label: "Personnalisé (Saisie Manuelle U)",               u: ""   },
-];
-const PRESETS_PLANCHERS = [
-  { val: "dalle_pleine", label: "Dalle Pleine (15cm)",                            u: 2.70 },
-  { val: "manuel",       label: "Personnalisé (Saisie Manuelle U)",               u: ""   },
-];
+// ── DTR C3.2 base temperatures by zone (fallback — until CLIMATE_ZONES carries them) ──
+const ZONE_BASE_TEMP = { A: 4, B: 2, C: -2, D: 5, E: 6, E1: 6 };
 
-// ── Window / Door selector options ────────────────────────────────────────────
-const VITRAGE_OPTIONS = [
-  { val: "simple", label: "Vitrage Simple" },
-  { val: "double", label: "Double Vitrage (lame d'air)" },
-  { val: "dp30",   label: "Double Vitrage >30 mm" },
-  { val: "manuel", label: "Manuel (saisie libre)" },
-];
-const LAME_OPTIONS = [
-  { val: "5",  label: "5 mm" },
-  { val: "8",  label: "8 mm" },
-  { val: "10", label: "10 mm" },
-  { val: "12", label: "12 mm" },
-];
-const CADRE_OPTIONS = [
-  { val: "bois",  label: "Cadre Bois / PVC" },
-  { val: "metal", label: "Cadre Métal" },
-];
-const MATERIAU_OPTIONS = [
-  { val: "bois",   label: "Bois / Composite" },
-  { val: "metal",  label: "Métal" },
-  { val: "manuel", label: "Manuel (saisie libre)" },
-];
-const PROP_VITRAGE_OPTIONS = [
-  { val: "opaque", label: "Opaque (sans vitrage)" },
-  { val: "v30",    label: "Vitrée < 30 %" },
-  { val: "v60",    label: "Vitrée 30–60 %" },
-];
+// ── Default material vals matching the new dtrMaterials.js keys ──────────────
+const DEFAULT_WALL_PRESET  = "db_brique_10_air_10"; // U = 1.28
+const DEFAULT_WALL_U       = 1.28;
+const DEFAULT_ROOF_PRESET_TERRASSE = "terrasse_isol_8cm"; // U = 0.48
+const DEFAULT_ROOF_U_TERRASSE      = 0.48;
+const DEFAULT_ROOF_PRESET_TUILES   = "tuiles_avec_solivage"; // U = 4.06
+const DEFAULT_ROOF_U_TUILES        = 4.06;
+const DEFAULT_ROOF_PRESET_DALLE    = "dalle_beton_20cm"; // U = 3.57
+const DEFAULT_ROOF_U_DALLE         = 3.57;
+const DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm"; // U = 2.70
+const DEFAULT_FLOOR_U      = 2.70;
 
-// ── Atomic update builder when element type changes ───────────────────────────
+const DEFAULT_WIN_TYPE  = "double";
+const DEFAULT_WIN_LAME  = "10_11";
+const DEFAULT_WIN_CADRE = "bois_pvc";
+
+const DEFAULT_DOOR_MAT  = "bois_3_2cm"; // U = 3.36
+
+// ── Safe U-value helpers that never return an empty string ───────────────────
+const safeKV = (type, lame, cadre) => {
+  const u = gKV(type, lame, cadre);
+  return typeof u === "number" && Number.isFinite(u) ? u : null;
+};
+const safeKP = (mat, contact) => {
+  const u = gKP(mat, contact);
+  return typeof u === "number" && Number.isFinite(u) ? u : null;
+};
+
+// ── Atomic update builder when element type changes ──────────────────────────
 function buildUpdatesForElementType(prev, newElementType, group) {
   const updates = { elementType: newElementType };
   const contact = String(prev.contact ?? "EXT").toUpperCase();
@@ -94,36 +92,41 @@ function buildUpdatesForElementType(prev, newElementType, group) {
     const isDoor = newElementType.startsWith("Porte") && !newElementType.includes("Fenêtre");
 
     if (isWin) {
-      const winType  = prev.winType  || "double";
-      const winLame  = prev.winLame  || "12";
-      const winCadre = prev.winCadre || "bois";
+      const winType  = prev.winType  || DEFAULT_WIN_TYPE;
+      const winLame  = prev.winLame  || DEFAULT_WIN_LAME;
+      const winCadre = prev.winCadre || DEFAULT_WIN_CADRE;
       Object.assign(updates, { winType, winLame, winCadre });
       if (winType !== "manuel") {
-        updates.uValue = gKV(winType, Number(winLame) || 12, winCadre === "metal" ? "metal" : "bois");
+        const u = safeKV(winType, winLame, winCadre);
+        if (u !== null) updates.uValue = u;
       }
       return updates;
     }
 
     if (isDoor) {
-      const doorMat = prev.doorMat || "bois";
-      const doorVit = prev.doorVit || "opaque";
-      Object.assign(updates, { doorMat, doorVit });
-      if (doorMat !== "manuel") updates.uValue = gKP(doorMat, doorVit, contact);
+      const doorMat = prev.doorMat || DEFAULT_DOOR_MAT;
+      Object.assign(updates, { doorMat });
+      if (doorMat !== "manuel") {
+        const u = safeKP(doorMat, contact === "LNC" ? "lnc" : "exterieur");
+        if (u !== null) updates.uValue = u;
+      }
       return updates;
     }
 
     // Opaque wall
-    return { ...updates, composition: "brique_double", uValue: 1.28 };
+    return { ...updates, composition: DEFAULT_WALL_PRESET, uValue: DEFAULT_WALL_U };
   }
 
   if (group === "roof") {
-    if (newElementType.includes("Tuiles"))   return { ...updates, composition: "tuiles",       uValue: 2.5  };
-    if (newElementType.includes("Terrasse")) return { ...updates, composition: "terrasse_iso",  uValue: 0.48 };
-    return { ...updates, composition: "dalle_pleine", uValue: 3.57 };
+    if (newElementType.includes("Tuiles"))
+      return { ...updates, composition: DEFAULT_ROOF_PRESET_TUILES,   uValue: DEFAULT_ROOF_U_TUILES };
+    if (newElementType.includes("Terrasse"))
+      return { ...updates, composition: DEFAULT_ROOF_PRESET_TERRASSE, uValue: DEFAULT_ROOF_U_TERRASSE };
+    return { ...updates, composition: DEFAULT_ROOF_PRESET_DALLE, uValue: DEFAULT_ROOF_U_DALLE };
   }
 
   if (group === "floor" && contact !== "SOL") {
-    return { ...updates, composition: "dalle_pleine", uValue: 2.7 };
+    return { ...updates, composition: DEFAULT_FLOOR_PRESET, uValue: DEFAULT_FLOOR_U };
   }
 
   return updates;
@@ -162,15 +165,18 @@ export default function RoomEditor({
 
   if (!room) return null;
 
-  const wilaya = WILAYAS.find((w) => w.id === (project.info?.wilayaId ?? 16)) ?? WILAYAS[0];
-  const zone   = CLIMATE_ZONES[wilaya.zone] ?? CLIMATE_ZONES.A;
-  const T_outdoor = zone.baseTemp;
+  // Climate resolution — commune-selected zone first, then wilaya default.
+  const wilayaId = project.info?.wilayaId ?? 16;
+  const wilaya   = WILAYAS.find((w) => w.id === wilayaId) ?? WILAYAS[0];
+  const zoneKey  = project.info?.climateZone ?? wilaya?.defaultZone ?? "A";
+  const zone     = CLIMATE_ZONES[zoneKey] ?? CLIMATE_ZONES.A;
+  const T_outdoor = zone?.baseTemp ?? ZONE_BASE_TEMP[zoneKey] ?? 0;
   const T_indoor  = Number(project.info?.indoorSetpoint ?? 20);
   const T_ground  = Number(project.info?.groundTemp ?? 10);
 
   const { Qt, Qt_ponts, Qv, Cin, Q_total } = lossMetrics;
 
-  // ── Preset handlers (defined once, outside the .map()) ───────────────────
+  // ── Preset handlers (defined once, outside the .map()) ─────────────────────
   const handlePresetChange = (id, value, presets) => {
     const preset = presets.find((p) => p.val === value);
     const updates = { composition: value };
@@ -180,20 +186,24 @@ export default function RoomEditor({
 
   const handleWinChange = (id, s, field, value) => {
     const updates = { [field]: value };
-    const type  = field === "winType"  ? value : (s.winType  || "double");
-    const lame  = field === "winLame"  ? value : (s.winLame  || "12");
-    const cadre = field === "winCadre" ? value : (s.winCadre || "bois");
-    if (type !== "manuel") {
-      updates.uValue = gKV(type, Number(lame) || 12, cadre === "metal" ? "metal" : "bois");
+    const type  = field === "winType"  ? value : (s.winType  || DEFAULT_WIN_TYPE);
+    const lame  = field === "winLame"  ? value : (s.winLame  || DEFAULT_WIN_LAME);
+    const cadre = field === "winCadre" ? value : (s.winCadre || DEFAULT_WIN_CADRE);
+    if (type !== "manuel" && cadre !== "manuel" && lame !== "manuel") {
+      const u = safeKV(type, lame, cadre);
+      if (u !== null) updates.uValue = u;
     }
     onUpdateSurface(id, updates);
   };
 
   const handleDoorChange = (id, s, field, value) => {
     const updates = { [field]: value };
-    const mat = field === "doorMat" ? value : (s.doorMat || "bois");
-    const vit = field === "doorVit" ? value : (s.doorVit || "opaque");
-    if (mat !== "manuel") updates.uValue = gKP(mat, vit, s.contact || "EXT");
+    const mat     = field === "doorMat" ? value : (s.doorMat || DEFAULT_DOOR_MAT);
+    const contact = String(s.contact ?? "EXT").toUpperCase() === "LNC" ? "lnc" : "exterieur";
+    if (mat !== "manuel") {
+      const u = safeKP(mat, contact);
+      if (u !== null) updates.uValue = u;
+    }
     onUpdateSurface(id, updates);
   };
 
@@ -212,7 +222,7 @@ export default function RoomEditor({
             />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Volume"           value={room.volume      ?? 0}   onChange={(v) => onRoomChange({ ...room, volume: v })}      unit="m³"  />
+            <Field label="Volume"           value={room.volume       ?? 0}   onChange={(v) => onRoomChange({ ...room, volume: v })}       unit="m³"  />
             <Field label="Infiltration (N)" value={room.infiltration ?? 0.5} onChange={(v) => onRoomChange({ ...room, infiltration: v })} unit="ACH" />
           </div>
         </div>
@@ -258,15 +268,19 @@ export default function RoomEditor({
                   ? surf.composition
                   : "manuel";
 
-            // Auto-computed K values (null when "manuel" selected)
+            // Auto-computed K values (null when "manuel" selected or invalid)
             const autoKV =
               isWindow && surf.winType !== "manuel"
-                ? gKV(surf.winType || "double", Number(surf.winLame || "12"), surf.winCadre || "bois")
+                ? safeKV(surf.winType || DEFAULT_WIN_TYPE, surf.winLame || DEFAULT_WIN_LAME, surf.winCadre || DEFAULT_WIN_CADRE)
                 : null;
+            const doorContact = contactValue === "LNC" ? "lnc" : "exterieur";
             const autoKP =
               isDoor && surf.doorMat !== "manuel"
-                ? gKP(surf.doorMat || "bois", surf.doorVit || "opaque", contactValue)
+                ? safeKP(surf.doorMat || DEFAULT_DOOR_MAT, doorContact)
                 : null;
+
+            // Only show lame for double glazing — simple glazing has no air-gap
+            const showLame = isWindow && (surf.winType === "double" || (!surf.winType));
 
             return (
               <div
@@ -305,7 +319,8 @@ export default function RoomEditor({
                             const updates = { contact: newC };
                             // Re-compute door K when contact changes
                             if (isDoor && surf.doorMat !== "manuel") {
-                              updates.uValue = gKP(surf.doorMat || "bois", surf.doorVit || "opaque", newC);
+                              const u = safeKP(surf.doorMat || DEFAULT_DOOR_MAT, newC === "LNC" ? "lnc" : "exterieur");
+                              if (u !== null) updates.uValue = u;
                             }
                             onUpdateSurface(surf.id, updates);
                           }}
@@ -440,26 +455,26 @@ export default function RoomEditor({
                       <div>
                         <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Vitrage</label>
                         <select
-                          value={surf.winType || "double"}
+                          value={surf.winType || DEFAULT_WIN_TYPE}
                           onChange={(e) => handleWinChange(surf.id, surf, "winType", e.target.value)}
                           className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
                         >
-                          {VITRAGE_OPTIONS.map((o) => (
+                          {VITRAGE_OPTS.map((o) => (
                             <option key={o.val} value={o.val} style={{ background: "var(--app-bg-color)" }}>{o.label}</option>
                           ))}
                         </select>
                       </div>
 
-                      {/* Lame d'air only for double glazing */}
-                      {(surf.winType === "double" || !surf.winType) && surf.winType !== "manuel" && (
+                      {/* Lame d'air — only relevant for double glazing */}
+                      {showLame && surf.winType !== "manuel" && (
                         <div>
                           <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Lame d&apos;air</label>
                           <select
-                            value={surf.winLame || "12"}
+                            value={surf.winLame || DEFAULT_WIN_LAME}
                             onChange={(e) => handleWinChange(surf.id, surf, "winLame", e.target.value)}
                             className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
                           >
-                            {LAME_OPTIONS.map((o) => (
+                            {LAME_OPTS.map((o) => (
                               <option key={o.val} value={o.val} style={{ background: "var(--app-bg-color)" }}>{o.label}</option>
                             ))}
                           </select>
@@ -470,11 +485,11 @@ export default function RoomEditor({
                         <div>
                           <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Cadre</label>
                           <select
-                            value={surf.winCadre || "bois"}
+                            value={surf.winCadre || DEFAULT_WIN_CADRE}
                             onChange={(e) => handleWinChange(surf.id, surf, "winCadre", e.target.value)}
                             className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
                           >
-                            {CADRE_OPTIONS.map((o) => (
+                            {CADRE_OPTS.map((o) => (
                               <option key={o.val} value={o.val} style={{ background: "var(--app-bg-color)" }}>{o.label}</option>
                             ))}
                           </select>
@@ -489,7 +504,7 @@ export default function RoomEditor({
                             className="mt-1 rounded-md px-2 py-1.5 text-sm font-mono font-bold border"
                             style={{ background: "var(--success-bg)", borderColor: "var(--success-border)", color: "var(--success-text)" }}
                           >
-                            {autoKV !== null ? autoKV : "—"} W/m²K
+                            {autoKV !== null ? autoKV.toFixed(2) : "—"} W/m²K
                           </div>
                         </div>
                       )}
@@ -512,35 +527,20 @@ export default function RoomEditor({
                   {/* ── SMART SELECTOR: Doors ── */}
                   {isDoor && (
                     <>
-                      <div>
-                        <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Matériau</label>
+                      <div className="md:col-span-2">
+                        <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Matériau / Type</label>
                         <select
-                          value={surf.doorMat || "bois"}
+                          value={surf.doorMat || DEFAULT_DOOR_MAT}
                           onChange={(e) => handleDoorChange(surf.id, surf, "doorMat", e.target.value)}
                           className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
                         >
-                          {MATERIAU_OPTIONS.map((o) => (
+                          {MATERIAU_OPTS.map((o) => (
                             <option key={o.val} value={o.val} style={{ background: "var(--app-bg-color)" }}>{o.label}</option>
                           ))}
                         </select>
                       </div>
 
-                      {surf.doorMat !== "manuel" && (
-                        <div>
-                          <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>Proportion Vitrage</label>
-                          <select
-                            value={surf.doorVit || "opaque"}
-                            onChange={(e) => handleDoorChange(surf.id, surf, "doorVit", e.target.value)}
-                            className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
-                          >
-                            {PROP_VITRAGE_OPTIONS.map((o) => (
-                              <option key={o.val} value={o.val} style={{ background: "var(--app-bg-color)" }}>{o.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-
-                      {/* Auto K badge */}
+                      {/* Auto K badge — contact derived from surf.contact */}
                       {surf.doorMat !== "manuel" && (
                         <div>
                           <label className="text-xs font-medium" style={{ color: "var(--glass-text)", opacity: 0.8 }}>
@@ -551,7 +551,7 @@ export default function RoomEditor({
                             className="mt-1 rounded-md px-2 py-1.5 text-sm font-mono font-bold border"
                             style={{ background: "var(--success-bg)", borderColor: "var(--success-border)", color: "var(--success-text)" }}
                           >
-                            {autoKP !== null ? autoKP : "—"} W/m²K
+                            {autoKP !== null ? autoKP.toFixed(2) : "—"} W/m²K
                           </div>
                         </div>
                       )}

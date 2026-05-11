@@ -1,4 +1,29 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import {
+  PRESETS_MURS,
+  PRESETS_TOITURES,
+  PRESETS_PLANCHERS,
+  VITRAGE_OPTS,
+  LAME_OPTS,
+  CADRE_OPTS,
+  MATERIAU_OPTS,
+  gKV,
+  gKP,
+} from "./dtrMaterials.js";
+
+// Local DTR-C3.2 default values (match dtrMaterials.js keys)
+const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";
+const DTR_DEFAULT_WALL_U      = 1.28;
+const DTR_DEFAULT_ROOF_PRESET = "terrasse_isol_8cm";
+const DTR_DEFAULT_ROOF_U      = 0.48;
+const DTR_DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm";
+const DTR_DEFAULT_FLOOR_U     = 2.70;
+const DTR_DEFAULT_WIN_TYPE    = "double";
+const DTR_DEFAULT_WIN_LAME    = "10_11";
+const DTR_DEFAULT_WIN_CADRE   = "bois_pvc";
+const DTR_DEFAULT_DOOR_MAT    = "bois_3_2cm";
+
+const safeNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 const SC = 50;
 const SR = 18;
@@ -990,8 +1015,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         bridgeLength: w.length,
         psi: 0.45,
         // DTR C3.2 default — Double paroi brique (10+air+10)
-        composition: "brique_double",
-        uValue: 1.28,
+        composition: DTR_DEFAULT_WALL_PRESET,
+        uValue: DTR_DEFAULT_WALL_U,
       })),
       ...doors.map((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
@@ -1661,6 +1686,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
                       {selected.type === "wall" && (() => {
                         const w = selectedEl;
+                        const wallPreset = w.composition || DTR_DEFAULT_WALL_PRESET;
+                        const isManualWall = wallPreset === "manuel" || !PRESETS_MURS.some(p => p.val === wallPreset);
+                        const resolvedPreset = isManualWall ? "manuel" : wallPreset;
                         return (
                           <div>
                             <StatRow label="Longueur" val={`${w.length.toFixed(3)} m`} col="#60a5fa" />
@@ -1676,12 +1704,56 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Surface brute"  val={`${w.grossArea.toFixed(3)} m²`} col="#a78bfa" />
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
+
+                            {/* DTR C3.2 — Wall material preset */}
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau (DTR C3.2)</div>
+                              <select
+                                value={resolvedPreset}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  const preset = PRESETS_MURS.find(p => p.val === val);
+                                  setWalls(prev => prev.map(x => x.id !== w.id ? x : {
+                                    ...x,
+                                    composition: val,
+                                    ...(preset && preset.u !== "" ? { uValue: preset.u } : {}),
+                                  }));
+                                }}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                {PRESETS_MURS.map(p => (
+                                  <option key={p.val} value={p.val}>{p.label}</option>
+                                ))}
+                              </select>
+                              {resolvedPreset !== "manuel" && safeNum(w.uValue) !== null && (
+                                <div style={{ color: "#60a5fa", fontSize: 11, fontFamily: "monospace", marginTop: 4 }}>
+                                  U = {Number(w.uValue).toFixed(2)} W/m²K
+                                </div>
+                              )}
+                              {resolvedPreset === "manuel" && (
+                                <input type="number" min="0.01" max="10" step="0.01"
+                                  value={w.uValue ?? ""}
+                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, uValue: Number(e.target.value) }))}
+                                  placeholder="U manuel (W/m²K)"
+                                  style={{
+                                    width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                    borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 4,
+                                  }}
+                                />
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
 
                       {selected.type === "door" && (() => {
                         const d = selectedEl;
+                        const doorMat = d.doorMat || DTR_DEFAULT_DOOR_MAT;
+                        const doorContact = (d.contact || "EXT").toUpperCase() === "LNC" ? "lnc" : "exterieur";
+                        const autoK = doorMat !== "manuel" ? safeNum(gKP(doorMat, doorContact)) : null;
                         return (
                           <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
@@ -1703,12 +1775,82 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               <span style={{ color: "#3a5570", fontSize: 11 }}>m</span>
                             </div>
                             <StatRow label="Surface" val={`${d.area.toFixed(3)} m²`} col="#4ade80" />
+
+                            {/* DTR C3.2 — Door material + contact */}
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau / Type (DTR C3.2)</div>
+                              <select
+                                value={doorMat}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  const u = val !== "manuel" ? safeNum(gKP(val, doorContact)) : null;
+                                  setDoors(prev => prev.map(x => x.id !== d.id ? x : {
+                                    ...x, doorMat: val, ...(u !== null ? { uValue: u } : {}),
+                                  }));
+                                }}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                {MATERIAU_OPTS.map(o => (
+                                  <option key={o.val} value={o.val}>{o.label}</option>
+                                ))}
+                              </select>
+
+                              <div style={{ color: "#4a6a8a", fontSize: 10, margin: "6px 0 4px 0" }}>Contact</div>
+                              <select
+                                value={(d.contact || "EXT").toUpperCase()}
+                                onChange={e => {
+                                  const newC = e.target.value;
+                                  const ct = newC === "LNC" ? "lnc" : "exterieur";
+                                  const u = doorMat !== "manuel" ? safeNum(gKP(doorMat, ct)) : null;
+                                  setDoors(prev => prev.map(x => x.id !== d.id ? x : {
+                                    ...x, contact: newC, ...(u !== null ? { uValue: u } : {}),
+                                  }));
+                                }}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                <option value="EXT">Extérieur</option>
+                                <option value="LNC">Local Non Chauffé (LNC)</option>
+                              </select>
+
+                              {doorMat !== "manuel" && autoK !== null && (
+                                <div style={{ color: "#4ade80", fontSize: 11, fontFamily: "monospace", marginTop: 6 }}>
+                                  K = {autoK.toFixed(2)} W/m²K
+                                </div>
+                              )}
+                              {doorMat === "manuel" && (
+                                <input type="number" min="0.01" max="10" step="0.01"
+                                  value={d.uValue ?? ""}
+                                  onChange={e => setDoors(prev => prev.map(x => x.id !== d.id ? x : { ...x, uValue: Number(e.target.value) }))}
+                                  placeholder="K manuel (W/m²K)"
+                                  style={{
+                                    width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                    borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 6,
+                                  }}
+                                />
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
 
                       {selected.type === "window" && (() => {
                         const wv = selectedEl;
+                        const winType  = wv.winType  || DTR_DEFAULT_WIN_TYPE;
+                        const winLame  = wv.winLame  || DTR_DEFAULT_WIN_LAME;
+                        const winCadre = wv.winCadre || DTR_DEFAULT_WIN_CADRE;
+                        const showLame = winType === "double";
+                        const autoK    = winType !== "manuel" ? safeNum(gKV(winType, winLame, winCadre)) : null;
+
+                        const updateWin = (patch) => {
+                          setWins(prev => prev.map(x => x.id !== wv.id ? x : { ...x, ...patch }));
+                        };
+
                         return (
                           <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
@@ -1730,6 +1872,88 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               <span style={{ color: "#3a5570", fontSize: 11 }}>m</span>
                             </div>
                             <StatRow label="Surface" val={`${wv.area.toFixed(3)} m²`} col="#60a5fa" />
+
+                            {/* DTR C3.2 — Window vitrage / lame / cadre */}
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Vitrage (DTR C3.2)</div>
+                              <select
+                                value={winType}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  const u = val !== "manuel" ? safeNum(gKV(val, winLame, winCadre)) : null;
+                                  updateWin({ winType: val, ...(u !== null ? { uValue: u } : {}) });
+                                }}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                {VITRAGE_OPTS.map(o => (
+                                  <option key={o.val} value={o.val}>{o.label}</option>
+                                ))}
+                              </select>
+
+                              {showLame && winType !== "manuel" && (
+                                <>
+                                  <div style={{ color: "#4a6a8a", fontSize: 10, margin: "6px 0 4px 0" }}>Lame d&apos;air</div>
+                                  <select
+                                    value={winLame}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      const u = safeNum(gKV(winType, val, winCadre));
+                                      updateWin({ winLame: val, ...(u !== null ? { uValue: u } : {}) });
+                                    }}
+                                    style={{
+                                      width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                      borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                    }}
+                                  >
+                                    {LAME_OPTS.map(o => (
+                                      <option key={o.val} value={o.val}>{o.label}</option>
+                                    ))}
+                                  </select>
+                                </>
+                              )}
+
+                              {winType !== "manuel" && (
+                                <>
+                                  <div style={{ color: "#4a6a8a", fontSize: 10, margin: "6px 0 4px 0" }}>Cadre</div>
+                                  <select
+                                    value={winCadre}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      const u = safeNum(gKV(winType, winLame, val));
+                                      updateWin({ winCadre: val, ...(u !== null ? { uValue: u } : {}) });
+                                    }}
+                                    style={{
+                                      width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                      borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                    }}
+                                  >
+                                    {CADRE_OPTS.map(o => (
+                                      <option key={o.val} value={o.val}>{o.label}</option>
+                                    ))}
+                                  </select>
+                                </>
+                              )}
+
+                              {winType !== "manuel" && autoK !== null && (
+                                <div style={{ color: "#60a5fa", fontSize: 11, fontFamily: "monospace", marginTop: 6 }}>
+                                  K = {autoK.toFixed(2)} W/m²K
+                                </div>
+                              )}
+                              {winType === "manuel" && (
+                                <input type="number" min="0.01" max="10" step="0.01"
+                                  value={wv.uValue ?? ""}
+                                  onChange={e => updateWin({ uValue: Number(e.target.value) })}
+                                  placeholder="K manuel (W/m²K)"
+                                  style={{
+                                    width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                    borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 6,
+                                  }}
+                                />
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
