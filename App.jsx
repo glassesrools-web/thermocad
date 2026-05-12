@@ -92,16 +92,122 @@ export default function App() {
 
   const handleExport = useCallback((cadSurfaces) => {
     if (!Array.isArray(cadSurfaces) || cadSurfaces.length === 0) return;
-    let targetLocalId = activeId?.type === "room" ? activeId.localId : null;
-    let targetRoomId = activeId?.type === "room" ? activeId.roomId : null;
-    if (!targetLocalId || !targetRoomId) {
-      const firstLocal = (project.locals ?? [])[0]; const firstRoom = firstLocal?.rooms?.[0];
-      if (!firstLocal || !firstRoom) { setError("Aucune pièce disponible pour recevoir les surfaces. Créez une pièce d'abord."); return; }
-      targetLocalId = firstLocal.id; targetRoomId = firstRoom.id;
+
+    // ── Resolve the fallback local (first existing, or a freshly-created one) ──
+    const locals = project.locals ?? [];
+    const fallbackLocal = locals[0] ?? null;
+    const fallbackRoom  = fallbackLocal?.rooms?.[0] ?? null;
+
+    if (!fallbackLocal || !fallbackRoom) {
+      setError("Aucune pièce disponible pour recevoir les surfaces. Créez une pièce d'abord.");
+      return;
     }
-    const normalized = cadSurfaces.map((s) => ({ ...s, id: generateId(), group: s.group ?? "vertical", contact: s.contact ?? "EXT" }));
-    setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== targetLocalId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => { if (r.id !== targetRoomId) return r; return { ...r, surfaces: [...(r.surfaces ?? []), ...normalized] }; }) }; }) }));
-    setActiveId({ type: "room", localId: targetLocalId, roomId: targetRoomId }); setWorkspaceView("calculator"); setError("");
+
+    // ── Group incoming surfaces by their CAD roomId ──────────────────────────
+    // Surfaces that carry a roomId are matched to existing App rooms by name
+    // (since CAD room IDs are canvas-local and differ from App room IDs).
+    // Surfaces without a roomId fall back to the active room or the first room.
+
+    // Build a name→{localId,roomId} lookup across all rooms in the project
+    const roomByName = new Map();
+    for (const local of locals) {
+      for (const room of local.rooms ?? []) {
+        // lower-cased trim so "Salon" matches "salon"
+        roomByName.set(room.name.trim().toLowerCase(), { localId: local.id, roomId: room.id });
+      }
+    }
+
+    // Also group CAD surfaces by their cadRoomId so we can create new App rooms
+    // for any CAD room that has no name match.
+    const cadRoomGroups = new Map(); // cadRoomId → { cadRoomName, surfaces[] }
+    const ungrouped = [];
+
+    for (const s of cadSurfaces) {
+      const normalized = { ...s, id: generateId(), group: s.group ?? "vertical", contact: s.contact ?? "EXT" };
+      if (s.roomId) {
+        if (!cadRoomGroups.has(s.roomId)) {
+          cadRoomGroups.set(s.roomId, { cadRoomName: s.roomName ?? s.roomId, surfaces: [] });
+        }
+        cadRoomGroups.get(s.roomId).surfaces.push(normalized);
+      } else {
+        ungrouped.push(normalized);
+      }
+    }
+
+    // ── Build the project update ─────────────────────────────────────────────
+    setProject((p) => {
+      let nextLocals = p.locals ? p.locals.map(l => ({ ...l, rooms: l.rooms ? l.rooms.map(r => ({ ...r })) : [] })) : [];
+
+      // Helper: append surfaces to a specific room (mutates nextLocals in-place)
+      const appendTo = (localId, roomId, surfs) => {
+        nextLocals = nextLocals.map(l => {
+          if (l.id !== localId) return l;
+          return {
+            ...l,
+            rooms: l.rooms.map(r => {
+              if (r.id !== roomId) return r;
+              return { ...r, surfaces: [...(r.surfaces ?? []), ...surfs] };
+            }),
+          };
+        });
+      };
+
+      // For each CAD room group, find or create a matching App room
+      let lastMatchedLocalId = fallbackLocal.id;
+      let lastMatchedRoomId  = fallbackRoom.id;
+
+      for (const [, { cadRoomName, surfaces }] of cadRoomGroups) {
+        const key = cadRoomName.trim().toLowerCase();
+        const match = roomByName.get(key);
+
+        if (match) {
+          // Found an App room with the same name — append there
+          appendTo(match.localId, match.roomId, surfaces);
+          lastMatchedLocalId = match.localId;
+          lastMatchedRoomId  = match.roomId;
+        } else {
+          // No match — create a new room in the first local with this CAD name
+          const newRoomId = generateId();
+          const newRoom = {
+            id: newRoomId,
+            name: cadRoomName,
+            volume: 50,
+            infiltration: 0.5,
+            surfaces,
+          };
+          nextLocals = nextLocals.map((l, idx) => {
+            if (idx !== 0) return l; // add to first local
+            return { ...l, rooms: [...(l.rooms ?? []), newRoom] };
+          });
+          // Register in lookup so duplicate CAD room names don't create two App rooms
+          roomByName.set(key, { localId: nextLocals[0].id, roomId: newRoomId });
+          lastMatchedLocalId = nextLocals[0].id;
+          lastMatchedRoomId  = newRoomId;
+        }
+      }
+
+      // Ungrouped surfaces go to the active room (or fallback)
+      if (ungrouped.length > 0) {
+        const targetLocalId = activeId?.type === "room" ? activeId.localId : fallbackLocal.id;
+        const targetRoomId  = activeId?.type === "room" ? activeId.roomId  : fallbackRoom.id;
+        appendTo(targetLocalId, targetRoomId, ungrouped);
+        lastMatchedLocalId = targetLocalId;
+        lastMatchedRoomId  = targetRoomId;
+      }
+
+      // If nothing changed (cadRoomGroups empty AND ungrouped empty), bail
+      if (cadRoomGroups.size === 0 && ungrouped.length === 0) return p;
+
+      // After state update, navigate to the last touched room
+      // (use a microtask so setActiveId fires after setProject resolves)
+      Promise.resolve().then(() => {
+        setActiveId({ type: "room", localId: lastMatchedLocalId, roomId: lastMatchedRoomId });
+        setWorkspaceView("calculator");
+        setError("");
+      });
+
+      return { ...p, locals: nextLocals };
+    });
   }, [activeId, project.locals]);
 
   const calculate = useCallback(async () => {
