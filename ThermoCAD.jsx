@@ -1004,24 +1004,32 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       return;
     }
     const data = [
-      ...wallsEnriched.map((w) => ({
-        id: `cad-wall-${w.id}`,
-        group: "vertical",
-        elementType: "Mur Extérieur",
-        width: w.length,
-        height: w.height || DEFAULT_H,
-        area: w.netArea,
-        orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
-        bridgeLength: w.length,
-        psi: 0.45,
-        // DTR C3.2 default — Double paroi brique (10+air+10)
-        composition: DTR_DEFAULT_WALL_PRESET,
-        uValue: DTR_DEFAULT_WALL_U,
-      })),
+      // ── Vertical elements ──────────────────────────────────────────
+      ...wallsEnriched.map((w) => {
+        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id));
+        return {
+          id: `cad-wall-${w.id}`,
+          group: "vertical",
+          elementType: "Mur Extérieur",
+          width: w.length,
+          height: w.height || DEFAULT_H,
+          area: w.netArea,
+          orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
+          bridgeLength: w.length,
+          psi: 0.45,
+          composition: DTR_DEFAULT_WALL_PRESET,
+          uValue: DTR_DEFAULT_WALL_U,
+          roomId: ownerRoom ? ownerRoom.id : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
+        };
+      }),
       ...doors.map((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
-        const w = walls.find(wl => wl.id === d.wid);
+        const parentWall = walls.find(wl => wl.id === d.wid);
+        const ownerRoom = parentWall
+          ? rooms.find(rm => (rm.wallIds || []).includes(parentWall.id))
+          : null;
         return {
           id: `cad-door-${d.id}`,
           group: "vertical",
@@ -1029,32 +1037,60 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           width: dw,
           height: dh,
           area: dw * dh,
-          orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
+          orientation: parentWall ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2) : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
+          roomId: ownerRoom ? ownerRoom.id : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
         };
       }),
       ...wins.map((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
-        const w = walls.find(wl => wl.id === wv.wid);
+        const parentWall = walls.find(wl => wl.id === wv.wid);
+        const ownerRoom = parentWall
+          ? rooms.find(rm => (rm.wallIds || []).includes(parentWall.id))
+          : null;
         return {
           id: `cad-win-${wv.id}`,
           group: "vertical",
-          elementType: "Fenêtre",
+          elementType: "Fen\u00eatre",
           width: vw,
           height: vh,
           area: vw * vh,
-          orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
+          orientation: parentWall ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2) : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
+          roomId: ownerRoom ? ownerRoom.id : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
         };
       }),
+      // ── Horizontal elements (per room) ─────────────────────────────
+      ...rooms.map((rm) => ({
+        id: `cad-floor-${rm.id}`,
+        group: "floor",
+        elementType: "Plancher (" + rm.name + ")",
+        area: rm.area || 0,
+        composition: DTR_DEFAULT_FLOOR_PRESET,
+        uValue: DTR_DEFAULT_FLOOR_U,
+        roomId: rm.id,
+        roomName: rm.name,
+      })),
+      ...rooms.map((rm) => ({
+        id: `cad-roof-${rm.id}`,
+        group: "roof",
+        elementType: "Toiture (" + rm.name + ")",
+        area: rm.area || 0,
+        composition: DTR_DEFAULT_ROOF_PRESET,
+        uValue: DTR_DEFAULT_ROOF_U,
+        roomId: rm.id,
+        roomName: rm.name,
+      })),
     ];
     onExportSurfaces(data);
-    setInfo("✅ Exporté avec succès (Ponts auto-calculés) !");
+    setInfo("\u2705 Export\u00e9 avec succ\u00e8s (Ponts auto-calcul\u00e9s) !");
     setTimeout(() => setInfo(""), 2500);
-  }, [wallsEnriched, doors, wins, walls, onExportSurfaces]);
+  }, [wallsEnriched, doors, wins, walls, rooms, onExportSurfaces]);
 
   const S = {
     card: { background: "#0c1a28", borderRadius: 8, padding: "10px 12px", border: "1px solid #152030", marginBottom: 8 },
