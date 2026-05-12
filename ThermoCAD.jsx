@@ -28,6 +28,7 @@ const safeNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const SC = 50;
 const SR = 18;
 const WW = 5;
+const EPS_WALL = 4; // minimum pixel distance to register a new wall vertex
 const MAX_HISTORY = 50;
 const DEFAULT_H = 2.8;
 const DEFAULT_DOOR_W = 0.9;
@@ -112,7 +113,7 @@ const pointInPolygon = (pt, polygon) => {
 const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) => {
   if (currentWalls.length < 3) return existingRooms;
 
-  const EPS = 3; 
+  const EPS = 3;
   const verts = [];
   const getVIdx = (x, y) => {
     for (let i = 0; i < verts.length; i++)
@@ -121,8 +122,39 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
     return verts.length - 1;
   };
 
-  const halfEdges = [];
+  // Task 1 — T-Junction splitting: register every wall endpoint as a vertex
+  // first, then scan each wall for any vertex that lies strictly between its
+  // two endpoints; if found, subdivide the wall at that point so the planar
+  // graph is always properly connected at T-junctions.
+  currentWalls.forEach(w => { getVIdx(w.x1, w.y1); getVIdx(w.x2, w.y2); });
+
+  const splitWalls = [];
   currentWalls.forEach(w => {
+    const ax = w.x1, ay = w.y1, bx = w.x2, by = w.y2;
+    const len2 = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (len2 < 1) return; // degenerate wall — skip
+    const splits = [];
+    verts.forEach((v, vi) => {
+      if ((Math.abs(v.x - ax) < EPS && Math.abs(v.y - ay) < EPS) ||
+          (Math.abs(v.x - bx) < EPS && Math.abs(v.y - by) < EPS)) return;
+      const t = ((v.x - ax) * (bx - ax) + (v.y - ay) * (by - ay)) / len2;
+      if (t <= 0 || t >= 1) return;
+      const px = ax + t * (bx - ax), py = ay + t * (by - ay);
+      if (Math.abs(px - v.x) < EPS && Math.abs(py - v.y) < EPS) splits.push({ t, vi });
+    });
+    if (!splits.length) { splitWalls.push(w); return; }
+    splits.sort((a, b) => a.t - b.t);
+    let prevX = ax, prevY = ay;
+    splits.forEach(({ vi }) => {
+      const { x: nx, y: ny } = verts[vi];
+      splitWalls.push({ ...w, x1: prevX, y1: prevY, x2: nx, y2: ny });
+      prevX = nx; prevY = ny;
+    });
+    splitWalls.push({ ...w, x1: prevX, y1: prevY, x2: bx, y2: by });
+  });
+
+  const halfEdges = [];
+  splitWalls.forEach(w => {
     const a = getVIdx(w.x1, w.y1);
     const b = getVIdx(w.x2, w.y2);
     if (a !== b) {
@@ -169,12 +201,13 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
       const n = pts[(j + 1) % pts.length];
       area2 += pts[j].x * n.y - n.x * pts[j].y;
     }
-    if (area2 > 0)
-      faces.push({ pts, areaM2: parseFloat((area2 / 2 / (SC * SC)).toFixed(3)), wallIds: [...faceWallIds] });
+    // Task 2 — filter micro-rooms: ignore faces smaller than 0.1 m²
+    const areaM2 = area2 / 2 / (SC * SC);
+    if (area2 > 0 && areaM2 >= 0.1)
+      faces.push({ pts, areaM2: parseFloat(areaM2.toFixed(3)), wallIds: [...faceWallIds] });
   }
 
   const usedExisting = new Set();
-  let newCount = 0;
   return faces.map(face => {
     let matched = null;
     for (const rm of existingRooms) {
@@ -196,15 +229,18 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
     }
     if (matched) {
       usedExisting.add(matched.id);
-      return { ...matched, points: face.pts, area: face.areaM2, wallIds: face.wallIds };
+      // Task 2 — strip virtual T-junction split IDs; keep only real wall IDs
+      const realIds = face.wallIds.filter(id => currentWalls.some(w => w.id === id));
+      return { ...matched, points: face.pts, area: face.areaM2, wallIds: realIds };
     }
     const ci = ++rRefObj.current;
-    newCount++;
     return {
       id: `r${ci}`, name: `Pièce ${ci}`,
       points: face.pts, area: face.areaM2,
       colorIdx: ci, color: roomHsl(ci),
-      roomHeight: defaultH, wallIds: face.wallIds,
+      roomHeight: defaultH,
+      // Task 2 — only store real wall IDs
+      wallIds: face.wallIds.filter(id => currentWalls.some(w => w.id === id)),
     };
   });
 };
@@ -476,6 +512,11 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   }, [getSnap, poly, keyInput, pan]);
 
   const onClick = useCallback((e) => {
+    // Task 3 — right-click cancels current poly in progress
+    if (e.button === 2) {
+      if (poly.length > 0) { setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = []; }
+      return;
+    }
     if (e.detail > 1) return;
     const rect = cvs.current.getBoundingClientRect();
     const scaleX = cvs.current.width / rect.width;
@@ -533,7 +574,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         setPoly([{ x: s.x, y: s.y }]);
       } else {
         const first = poly[0], last = poly[poly.length - 1];
-        if (dist(last, s) < 2) return;
+        if (dist(last, s) < EPS_WALL) return; // Task 3 — zero-length guard
         if (poly.length >= 3 && dist(s, first) < SR) {
           const snap = getSnapshot(); pushUndo(snap);
           const closingWall = makeWall(nwid(), last.x, last.y, first.x, first.y, globalHeight);
@@ -1003,69 +1044,107 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       console.warn("ThermoCAD: onExportSurfaces prop non fourni.");
       return;
     }
+    // Task 5 — helper: resolve a wall’s contact type.
+    // Returns "EXT", "LNC", or "INT".
+    const resolveWallContact = (w) => {
+      // Manual override wins always
+      if (w.contact && w.contact !== "AUTO") return w.contact;
+      // Auto-detect: count how many rooms claim this wall
+      const roomCount = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+      if (roomCount === 0) return "INT"; // free-standing / unenclosed
+      if (roomCount >= 2) return "LNC";  // shared between two rooms → interior LNC
+      return "EXT";                      // belongs to exactly one room → exterior
+    };
+
     const data = [
-      // ── Vertical elements ──────────────────────────────────────────
+      // ── Vertical elements ────────────────────────────────────────────
       ...wallsEnriched.map((w) => {
-        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id));
+        // Task 5 — resolve contact, then pick label + composition
+        const contact = resolveWallContact(w);
+        const ownerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+        const ownerRoom  = ownerRooms[0] || null;
+        const elementType =
+          contact === "LNC" ? "Mur Intérieur (LNC)" :
+          contact === "INT" ? "Mur Intérieur"       :
+                              "Mur Extérieur";
         return {
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType,
+          contact,
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
           orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
           bridgeLength: w.length,
-          psi: 0.45,
-          composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
-          roomId: ownerRoom ? ownerRoom.id : null,
-          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
+          psi: contact === "LNC" ? 0.10 : 0.45,
+          composition: w.composition || DTR_DEFAULT_WALL_PRESET,
+          uValue: safeNum(w.uValue) !== null ? w.uValue : DTR_DEFAULT_WALL_U,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
       }),
+      // Task 6 — doors inherit parent wall’s resolved contact
       ...doors.map((d) => {
-        const dw = d.width || DEFAULT_DOOR_W;
+        const dw = d.width  || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const parentWall = walls.find(wl => wl.id === d.wid);
-        const ownerRoom = parentWall
+        const contact    = parentWall ? resolveWallContact(parentWall) : "EXT";
+        const ownerRoom  = parentWall
           ? rooms.find(rm => (rm.wallIds || []).includes(parentWall.id))
           : null;
+        const elementType = contact === "LNC" ? "Porte LNC" : "Porte";
         return {
           id: `cad-door-${d.id}`,
           group: "vertical",
-          elementType: "Porte",
+          elementType,
+          contact,
           width: dw,
           height: dh,
           area: dw * dh,
-          orientation: parentWall ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2) : "N",
+          orientation: parentWall
+            ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2)
+            : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
-          roomId: ownerRoom ? ownerRoom.id : null,
-          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
+          doorMat: d.doorMat || DTR_DEFAULT_DOOR_MAT,
+          uValue: safeNum(d.uValue) !== null ? d.uValue : undefined,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
       }),
+      // Task 6 — windows inherit parent wall’s resolved contact
       ...wins.map((wv) => {
-        const vw = wv.width || DEFAULT_WIN_W;
+        const vw = wv.width  || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const parentWall = walls.find(wl => wl.id === wv.wid);
-        const ownerRoom = parentWall
+        const contact    = parentWall ? resolveWallContact(parentWall) : "EXT";
+        const ownerRoom  = parentWall
           ? rooms.find(rm => (rm.wallIds || []).includes(parentWall.id))
           : null;
+        const elementType = contact === "LNC" ? "Fenêtre LNC" : "Fenêtre";
         return {
           id: `cad-win-${wv.id}`,
           group: "vertical",
-          elementType: "Fen\u00eatre",
+          elementType,
+          contact,
           width: vw,
           height: vh,
           area: vw * vh,
-          orientation: parentWall ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2) : "N",
+          orientation: parentWall
+            ? getOrientation(parentWall.x1, parentWall.y1, parentWall.x2, parentWall.y2)
+            : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
-          roomId: ownerRoom ? ownerRoom.id : null,
-          roomName: ownerRoom ? ownerRoom.name : "Non assign\u00e9",
+          winType:  wv.winType  || DTR_DEFAULT_WIN_TYPE,
+          winLame:  wv.winLame  || DTR_DEFAULT_WIN_LAME,
+          winCadre: wv.winCadre || DTR_DEFAULT_WIN_CADRE,
+          uValue: safeNum(wv.uValue) !== null ? wv.uValue : undefined,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
       }),
-      // ── Horizontal elements (per room) ─────────────────────────────
+      // ── Horizontal elements (per room) ─────────────────────────
       ...rooms.map((rm) => ({
         id: `cad-floor-${rm.id}`,
         group: "floor",
@@ -1073,7 +1152,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         area: rm.area || 0,
         composition: DTR_DEFAULT_FLOOR_PRESET,
         uValue: DTR_DEFAULT_FLOOR_U,
-        roomId: rm.id,
+        roomId:   rm.id,
         roomName: rm.name,
       })),
       ...rooms.map((rm) => ({
@@ -1083,12 +1162,12 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         area: rm.area || 0,
         composition: DTR_DEFAULT_ROOF_PRESET,
         uValue: DTR_DEFAULT_ROOF_U,
-        roomId: rm.id,
+        roomId:   rm.id,
         roomName: rm.name,
       })),
     ];
     onExportSurfaces(data);
-    setInfo("\u2705 Export\u00e9 avec succ\u00e8s (Ponts auto-calcul\u00e9s) !");
+    setInfo("✅ Exporté avec succès (Ponts auto-calculés) !");
     setTimeout(() => setInfo(""), 2500);
   }, [wallsEnriched, doors, wins, walls, rooms, onExportSurfaces]);
 
@@ -1414,7 +1493,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
             onMouseMove={onMove}
             onClick={onClick}
             onDoubleClick={() => { setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = []; }}
-            onContextMenu={(e) => e.preventDefault()}
+            onContextMenu={(e) => { e.preventDefault(); onClick(e); }}
             style={{ display: "block", cursor: mode === "select" ? "default" : "crosshair" }}
           />
         </div>
@@ -1725,6 +1804,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                         const wallPreset = w.composition || DTR_DEFAULT_WALL_PRESET;
                         const isManualWall = wallPreset === "manuel" || !PRESETS_MURS.some(p => p.val === wallPreset);
                         const resolvedPreset = isManualWall ? "manuel" : wallPreset;
+                        // Task 4 — wall type override: stored on the wall object itself
+                        const wallContact = w.contact || "AUTO";
                         return (
                           <div>
                             <StatRow label="Longueur" val={`${w.length.toFixed(3)} m`} col="#60a5fa" />
@@ -1741,8 +1822,33 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
 
-                            {/* DTR C3.2 — Wall material preset */}
+                            {/* Task 4 — Wall type / contact override */}
                             <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Type de mur</div>
+                              <select
+                                value={wallContact}
+                                onChange={e => setWalls(prev => prev.map(x =>
+                                  x.id !== w.id ? x : { ...x, contact: e.target.value }
+                                ))}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginBottom: 6,
+                                }}
+                              >
+                                <option value="AUTO">⚡ Auto-détecté</option>
+                                <option value="EXT">Extérieur</option>
+                                <option value="LNC">Local Non Chauffé (LNC)</option>
+                                <option value="INT">Intérieur (non exporté)</option>
+                              </select>
+                              {wallContact === "AUTO" && (
+                                <div style={{ color: "#4a6a8a", fontSize: 10, fontStyle: "italic", marginBottom: 6 }}>
+                                  Le type sera déduit automatiquement à l’export (un mur partagé par 2 pièces = LNC).
+                                </div>
+                              )}
+                            </div>
+
+                            {/* DTR C3.2 — Wall material preset */}
+                            <div style={{ marginTop: 6, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau (DTR C3.2)</div>
                               <select
                                 value={resolvedPreset}
