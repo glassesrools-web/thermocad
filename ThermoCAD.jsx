@@ -340,7 +340,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new window.Image();
-      img.onload = () => setBgImage(img);
+      img.onload = () => {
+        // Task 1 — anchor image to world-space origin (0,0) so it never
+        // shifts when the canvas is resized. The offset nudgers then move it
+        // in world coordinates, keeping it aligned with the drawn walls.
+        setBgOffsetX(0);
+        setBgOffsetY(0);
+        setBgImage(img);
+      };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
@@ -767,9 +774,10 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       ctx.globalAlpha = bgOpacity;
       const imgW = bgImage.width * bgScale;
       const imgH = bgImage.height * bgScale;
-      const drawX = (W - imgW) / 2 + bgOffsetX;
-      const drawY = (H - imgH) / 2 + bgOffsetY;
-      ctx.drawImage(bgImage, drawX, drawY, imgW, imgH);
+      // Task 2 — draw at absolute world coordinates (bgOffsetX, bgOffsetY).
+      // ctx is already translated by pan, so bgOffsetX/Y are in world space
+      // and stay perfectly aligned with the drawn walls on every resize.
+      ctx.drawImage(bgImage, bgOffsetX, bgOffsetY, imgW, imgH);
       ctx.restore();
     }
 
