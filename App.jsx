@@ -301,7 +301,7 @@ export default function App() {
           </div>
         </div>
       </main>
-      <div className="sr-only"><div ref={reportRef}><ReportTemplate project={project} results={results} chartData={bilanChartData} wattsPerCube={wattsPerCube} reportRows={reportRows} /></div></div>
+      <div style={{ position: "fixed", top: "-9999px", left: "-9999px", width: "210mm", minHeight: "297mm", background: "#fff", zIndex: -1 }}><div ref={reportRef}><ReportTemplate project={project} results={results} chartData={bilanChartData} wattsPerCube={wattsPerCube} reportRows={reportRows} /></div></div>
     </div>
   );
 }

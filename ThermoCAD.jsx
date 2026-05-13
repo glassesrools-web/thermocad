@@ -1050,11 +1050,48 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
         };
       }),
+      // ── Horizontal elements (per room) with thermal bridges ────────
+      ...rooms.map((rm) => {
+        const perim = rm.points ? rm.points.reduce((sum, pt, i, arr) => {
+          const next = arr[(i + 1) % arr.length];
+          return sum + Math.hypot(next.x - pt.x, next.y - pt.y) / SC;
+        }, 0) : 0;
+        return {
+          id: `cad-floor-${rm.id}`,
+          group: "floor",
+          elementType: "Plancher (" + rm.name + ")",
+          area: rm.area || 0,
+          composition: DTR_DEFAULT_FLOOR_PRESET,
+          uValue: DTR_DEFAULT_FLOOR_U,
+          bridgeLength: parseFloat(perim.toFixed(2)),
+          psi: 0.45,
+          roomId: rm.id,
+          roomName: rm.name,
+        };
+      }),
+      ...rooms.map((rm) => {
+        const perim = rm.points ? rm.points.reduce((sum, pt, i, arr) => {
+          const next = arr[(i + 1) % arr.length];
+          return sum + Math.hypot(next.x - pt.x, next.y - pt.y) / SC;
+        }, 0) : 0;
+        return {
+          id: `cad-roof-${rm.id}`,
+          group: "roof",
+          elementType: "Toiture (" + rm.name + ")",
+          area: rm.area || 0,
+          composition: DTR_DEFAULT_ROOF_PRESET,
+          uValue: DTR_DEFAULT_ROOF_U,
+          bridgeLength: parseFloat(perim.toFixed(2)),
+          psi: 0.50,
+          roomId: rm.id,
+          roomName: rm.name,
+        };
+      }),
     ];
     onExportSurfaces(data);
     setInfo("✅ Exporté avec succès (Ponts auto-calculés) !");
     setTimeout(() => setInfo(""), 2500);
-  }, [wallsEnriched, doors, wins, walls, onExportSurfaces]);
+  }, [wallsEnriched, doors, wins, walls, rooms, onExportSurfaces]);
 
   const S = {
     card: { background: "#0c1a28", borderRadius: 8, padding: "10px 12px", border: "1px solid #152030", marginBottom: 8 },
