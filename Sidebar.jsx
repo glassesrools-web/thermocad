@@ -257,8 +257,7 @@ export default function Sidebar({
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onDeleteRoom?.(local.id, room.id); }}
-                      disabled={rooms.length <= 1}
-                      className="p-1 rounded hover:bg-[var(--danger-bg)] opacity-40 hover:text-[var(--danger-text)] disabled:opacity-20 transition"
+                      className="p-1 rounded hover:bg-[var(--danger-bg)] opacity-40 hover:text-[var(--danger-text)] transition"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>

@@ -40,7 +40,7 @@ const BrandLogo = ({ size = "large" }) => {
   );
 };
 
-const createLocal = () => ({ id: generateId(), name: "New Local", rooms: [createRoom()] });
+const createLocal = () => ({ id: generateId(), name: "New Local", rooms: [] });
 const createRoom = () => ({ id: generateId(), name: "New Room", volume: 50, infiltration: 0.5, surfaces: [{ id: generateId(), group: "vertical", elementType: "Mur Extérieur", contact: "EXT", orientation: "N", width: 4, height: 2.6, area: 10.4, composition: "brique_double", uValue: 1.28 }] });
 const createSurface = (group = "vertical") => {
   // Defaults are seeded with DTR C3.2 preset values so the Smart Material
@@ -83,7 +83,7 @@ export default function App() {
   const addLocal = useCallback(() => { const newLocal = createLocal(); setProject((p) => ({ ...p, locals: [...(p.locals ?? []), newLocal] })); setActiveId(PROJECT_SUMMARY_ID); }, []);
   const addRoom = useCallback(() => { const locals = project.locals ?? []; if (locals.length === 0) { addLocal(); return; } const targetLocal = activeLocal ?? locals[0]; const newRoom = createRoom(); setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => l.id === targetLocal.id ? { ...l, rooms: [...(l.rooms ?? []), newRoom] } : l ) })); setActiveId({ type: "room", localId: targetLocal.id, roomId: newRoom.id }); }, [project.locals, activeLocal, addLocal]);
   const deleteLocal = useCallback((localId) => { const locals = project.locals ?? []; if (locals.length <= 1) return; const remaining = locals.filter((l) => l.id !== localId); setProject((p) => ({ ...p, locals: remaining })); if (activeId?.type === "local" && activeId?.id === localId) setActiveId(PROJECT_SUMMARY_ID); if (activeId?.type === "room" && activeId?.localId === localId) setActiveId(PROJECT_SUMMARY_ID); }, [project.locals, activeId]);
-  const deleteRoom = useCallback((localId, roomId) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; const rooms = (l.rooms ?? []).filter((r) => r.id !== roomId); if (rooms.length === 0) return { ...l, rooms: [createRoom()] }; return { ...l, rooms }; }) })); if (activeId?.type === "room" && activeId?.localId === localId && activeId?.roomId === roomId) setActiveId(PROJECT_SUMMARY_ID); }, [activeId]);
+  const deleteRoom = useCallback((localId, roomId) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; const rooms = (l.rooms ?? []).filter((r) => r.id !== roomId); return { ...l, rooms }; }) })); if (activeId?.type === "room" && activeId?.localId === localId && activeId?.roomId === roomId) setActiveId({ type: "local", id: localId }); }, [activeId]);
   const updateRoom = useCallback((localId, roomId, updates) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, ...updates } : r ) }; }) })); }, []);
   const addSurface = useCallback((localId, roomId, group = "vertical") => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: [...(r.surfaces ?? []), createSurface(group)] } : r ) }; }) })); }, []);
   const importSurfaces = useCallback((localId, roomId, surfaces) => { if (!Array.isArray(surfaces) || surfaces.length === 0) return; setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: [...(r.surfaces ?? []), ...surfaces] } : r ) }; }) })); }, []);
@@ -97,8 +97,8 @@ export default function App() {
     const fallbackLocal = locals[0] ?? null;
     const fallbackRoom  = fallbackLocal?.rooms?.[0] ?? null;
 
-    if (!fallbackLocal || !fallbackRoom) {
-      setError("Aucune pièce disponible pour recevoir les surfaces. Créez une pièce d'abord.");
+    if (!fallbackLocal) {
+      setError("Aucun local disponible. Créez un local d'abord.");
       return;
     }
 
@@ -127,7 +127,7 @@ export default function App() {
     }
 
     let lastLocalId = fallbackLocal.id;
-    let lastRoomId  = fallbackRoom.id;
+    let lastRoomId  = null;
 
     setProject((p) => {
       let nextLocals = p.locals.map(l => ({ ...l, rooms: l.rooms.map(r => ({ ...r })) }));
@@ -160,18 +160,32 @@ export default function App() {
         }
       }
 
-      // Surfaces with no roomId go to the active room (or fallback)
+      // Surfaces with no roomId are grouped under a dedicated catch-all room
       if (ungrouped.length > 0) {
-        const tLocalId = activeId?.type === "room" ? activeId.localId : fallbackLocal.id;
-        const tRoomId  = activeId?.type === "room" ? activeId.roomId  : fallbackRoom.id;
-        appendTo(tLocalId, tRoomId, ungrouped);
-        lastLocalId = tLocalId;
-        lastRoomId  = tRoomId;
+        const catchAllName = "Surfaces non assignées";
+        const catchAllKey  = catchAllName.toLowerCase();
+        const existing = roomByName.get(catchAllKey);
+        if (existing) {
+          appendTo(existing.localId, existing.roomId, ungrouped);
+          lastLocalId = existing.localId;
+          lastRoomId  = existing.roomId;
+        } else {
+          const newRoomId = generateId();
+          const newRoom = { id: newRoomId, name: catchAllName, volume: 50, infiltration: 0.5, surfaces: ungrouped };
+          nextLocals = nextLocals.map((l, idx) => idx !== 0 ? l : { ...l, rooms: [...(l.rooms ?? []), newRoom] });
+          roomByName.set(catchAllKey, { localId: nextLocals[0].id, roomId: newRoomId });
+          lastLocalId = nextLocals[0].id;
+          lastRoomId  = newRoomId;
+        }
       }
 
       // Navigate to the last touched room after state settles
       Promise.resolve().then(() => {
-        setActiveId({ type: "room", localId: lastLocalId, roomId: lastRoomId });
+        if (lastRoomId) {
+          setActiveId({ type: "room", localId: lastLocalId, roomId: lastRoomId });
+        } else {
+          setActiveId({ type: "local", id: lastLocalId });
+        }
         setWorkspaceView("calculator");
         setError("");
       });
