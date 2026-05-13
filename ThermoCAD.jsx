@@ -1051,11 +1051,12 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         };
       }),
       // ── Horizontal elements (per room) with thermal bridges ────────
+      // Perimeter is derived from wallsEnriched wall lengths (not raw polygon
+      // points) so it matches the same source of truth used for vertical elements.
       ...rooms.map((rm) => {
-        const perim = rm.points ? rm.points.reduce((sum, pt, i, arr) => {
-          const next = arr[(i + 1) % arr.length];
-          return sum + Math.hypot(next.x - pt.x, next.y - pt.y) / SC;
-        }, 0) : 0;
+        const perim = wallsEnriched
+          .filter(w => (rm.wallIds || []).includes(w.id))
+          .reduce((sum, w) => sum + (w.length || 0), 0);
         return {
           id: `cad-floor-${rm.id}`,
           group: "floor",
@@ -1070,10 +1071,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         };
       }),
       ...rooms.map((rm) => {
-        const perim = rm.points ? rm.points.reduce((sum, pt, i, arr) => {
-          const next = arr[(i + 1) % arr.length];
-          return sum + Math.hypot(next.x - pt.x, next.y - pt.y) / SC;
-        }, 0) : 0;
+        const perim = wallsEnriched
+          .filter(w => (rm.wallIds || []).includes(w.id))
+          .reduce((sum, w) => sum + (w.length || 0), 0);
         return {
           id: `cad-roof-${rm.id}`,
           group: "roof",
@@ -1082,7 +1082,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           composition: DTR_DEFAULT_ROOF_PRESET,
           uValue: DTR_DEFAULT_ROOF_U,
           bridgeLength: parseFloat(perim.toFixed(2)),
-          psi: 0.50,
+          psi: 0.45,
           roomId: rm.id,
           roomName: rm.name,
         };
