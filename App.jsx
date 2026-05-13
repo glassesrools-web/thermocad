@@ -92,16 +92,92 @@ export default function App() {
 
   const handleExport = useCallback((cadSurfaces) => {
     if (!Array.isArray(cadSurfaces) || cadSurfaces.length === 0) return;
-    let targetLocalId = activeId?.type === "room" ? activeId.localId : null;
-    let targetRoomId = activeId?.type === "room" ? activeId.roomId : null;
-    if (!targetLocalId || !targetRoomId) {
-      const firstLocal = (project.locals ?? [])[0]; const firstRoom = firstLocal?.rooms?.[0];
-      if (!firstLocal || !firstRoom) { setError("Aucune pièce disponible pour recevoir les surfaces. Créez une pièce d'abord."); return; }
-      targetLocalId = firstLocal.id; targetRoomId = firstRoom.id;
+
+    const locals = project.locals ?? [];
+    const fallbackLocal = locals[0] ?? null;
+    const fallbackRoom  = fallbackLocal?.rooms?.[0] ?? null;
+
+    if (!fallbackLocal || !fallbackRoom) {
+      setError("Aucune pièce disponible pour recevoir les surfaces. Créez une pièce d'abord.");
+      return;
     }
-    const normalized = cadSurfaces.map((s) => ({ ...s, id: generateId(), group: s.group ?? "vertical", contact: s.contact ?? "EXT" }));
-    setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== targetLocalId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => { if (r.id !== targetRoomId) return r; return { ...r, surfaces: [...(r.surfaces ?? []), ...normalized] }; }) }; }) }));
-    setActiveId({ type: "room", localId: targetLocalId, roomId: targetRoomId }); setWorkspaceView("calculator"); setError("");
+
+    // Build a case-insensitive name → {localId, roomId} lookup across all rooms
+    const roomByName = new Map();
+    for (const local of locals) {
+      for (const room of local.rooms ?? []) {
+        roomByName.set(room.name.trim().toLowerCase(), { localId: local.id, roomId: room.id });
+      }
+    }
+
+    // Group incoming surfaces by their CAD roomId (canvas-local ID + roomName)
+    const cadRoomGroups = new Map(); // cadRoomId → { cadRoomName, surfaces[] }
+    const ungrouped = [];
+
+    for (const s of cadSurfaces) {
+      const normalized = { ...s, id: generateId(), group: s.group ?? "vertical", contact: s.contact ?? "EXT" };
+      if (s.roomId) {
+        if (!cadRoomGroups.has(s.roomId)) {
+          cadRoomGroups.set(s.roomId, { cadRoomName: s.roomName ?? s.roomId, surfaces: [] });
+        }
+        cadRoomGroups.get(s.roomId).surfaces.push(normalized);
+      } else {
+        ungrouped.push(normalized);
+      }
+    }
+
+    let lastLocalId = fallbackLocal.id;
+    let lastRoomId  = fallbackRoom.id;
+
+    setProject((p) => {
+      let nextLocals = p.locals.map(l => ({ ...l, rooms: l.rooms.map(r => ({ ...r })) }));
+
+      const appendTo = (localId, roomId, surfs) => {
+        nextLocals = nextLocals.map(l => {
+          if (l.id !== localId) return l;
+          return { ...l, rooms: l.rooms.map(r => r.id !== roomId ? r : { ...r, surfaces: [...(r.surfaces ?? []), ...surfs] }) };
+        });
+      };
+
+      for (const [, { cadRoomName, surfaces }] of cadRoomGroups) {
+        const key = cadRoomName.trim().toLowerCase();
+        const match = roomByName.get(key);
+
+        if (match) {
+          // Matched an existing App room by name — route surfaces there
+          appendTo(match.localId, match.roomId, surfaces);
+          lastLocalId = match.localId;
+          lastRoomId  = match.roomId;
+        } else {
+          // No name match — create a new room in the first local
+          const newRoomId = generateId();
+          const newRoom = { id: newRoomId, name: cadRoomName, volume: 50, infiltration: 0.5, surfaces };
+          nextLocals = nextLocals.map((l, idx) => idx !== 0 ? l : { ...l, rooms: [...(l.rooms ?? []), newRoom] });
+          // Register so duplicate CAD room names don't create two App rooms
+          roomByName.set(key, { localId: nextLocals[0].id, roomId: newRoomId });
+          lastLocalId = nextLocals[0].id;
+          lastRoomId  = newRoomId;
+        }
+      }
+
+      // Surfaces with no roomId go to the active room (or fallback)
+      if (ungrouped.length > 0) {
+        const tLocalId = activeId?.type === "room" ? activeId.localId : fallbackLocal.id;
+        const tRoomId  = activeId?.type === "room" ? activeId.roomId  : fallbackRoom.id;
+        appendTo(tLocalId, tRoomId, ungrouped);
+        lastLocalId = tLocalId;
+        lastRoomId  = tRoomId;
+      }
+
+      // Navigate to the last touched room after state settles
+      Promise.resolve().then(() => {
+        setActiveId({ type: "room", localId: lastLocalId, roomId: lastRoomId });
+        setWorkspaceView("calculator");
+        setError("");
+      });
+
+      return { ...p, locals: nextLocals };
+    });
   }, [activeId, project.locals]);
 
   const calculate = useCallback(async () => {
