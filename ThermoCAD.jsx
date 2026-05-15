@@ -10,7 +10,7 @@ import {
   ISOLANT_OPTS,
   gKV,
   gKP,
-} from "./dtrMaterials.js";
+} from "../data/dtrMaterials.js";
 
 // Local DTR-C3.2 default values (match dtrMaterials.js keys)
 const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";

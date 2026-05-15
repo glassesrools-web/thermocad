@@ -3,7 +3,7 @@ import { LayoutGrid, Plus, Trash2 } from "lucide-react";
 import Field from "./Field.jsx";
 import Section from "./Section.jsx";
 import { calculateRoomLosses } from "../../utils/dtrMath";
-import { CLIMATE_ZONES, WILAYAS } from "./algeria_climate.js";
+import { CLIMATE_ZONES, WILAYAS } from "../../data/algeria_climate.js";
 import {
   PRESETS_MURS,
   PRESETS_TOITURES,
@@ -15,7 +15,7 @@ import {
   ISOLANT_OPTS,
   gKV,
   gKP,
-} from "./dtrMaterials.js";
+} from "../../data/dtrMaterials.js";
 
 const genId = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 

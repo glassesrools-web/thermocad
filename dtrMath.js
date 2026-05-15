@@ -7,8 +7,8 @@
  *   calculateRoomLosses(project, room)                     → loss metrics object
  */
 
-import { ISOLANT_OPTS } from "./dtrMaterials.js";
-import { CLIMATE_ZONES, WILAYAS } from "./algeria_climate.js";
+import { ISOLANT_OPTS } from "../data/dtrMaterials.js";
+import { CLIMATE_ZONES, WILAYAS } from "../data/algeria_climate.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
