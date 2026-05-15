@@ -1052,10 +1052,15 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const data = [
       ...wallsEnriched.map((w) => {
         const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
+        const sharedRooms = rooms.filter(r => (r.wallIds || []).includes(w.id)).length;
+        let typeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        if (w.contactOverride === "ext") typeStr = "Mur Extérieur";
+        if (w.contactOverride === "int") typeStr = "Mur Intérieur";
+        if (w.contactOverride === "lnc") typeStr = "Mur LNC";
         return {
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType: typeStr,
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
@@ -1830,8 +1835,26 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               )}
                             </div>
 
+                            {/* Contact / Type override */}
+                            <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Type de paroi (Contact)</div>
+                              <select
+                                value={w.contactOverride || "auto"}
+                                onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, contactOverride: e.target.value }))}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                <option value="auto">Automatique (Détecté par CAD)</option>
+                                <option value="ext">Forcer : Mur Extérieur</option>
+                                <option value="int">Forcer : Mur Intérieur</option>
+                                <option value="lnc">Forcer : Local Non Chauffé (LNC)</option>
+                              </select>
+                            </div>
+
                             {/* DTR C3.2 — Wall material preset */}
-                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
+                            <div style={{ marginTop: 0, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau (DTR C3.2)</div>
                               <select
                                 value={resolvedPreset}
