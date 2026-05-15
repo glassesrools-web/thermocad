@@ -173,3 +173,17 @@ export function gKP(materiau, contact) {
   if (!row) return "";
   return row[contact] !== undefined ? row[contact] : "";
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSULATION MATERIALS  (Isolants)
+// DTR C3.2 typical lambda values (W/m·K)
+// ─────────────────────────────────────────────────────────────────────────────
+export const ISOLANT_OPTS = [
+  { val: "aucun",                label: "Aucun isolant",                        lambda: null  },
+  { val: "polystyrene_expanse",  label: "Polystyrène expansé (PSE)",            lambda: 0.038 },
+  { val: "laine_de_roche",       label: "Laine de roche",                       lambda: 0.038 },
+  { val: "laine_de_verre",       label: "Laine de verre",                       lambda: 0.040 },
+  { val: "liege",                label: "Liège",                                lambda: 0.040 },
+  { val: "polyurethane",         label: "Mousse de Polyuréthane (PUR)",         lambda: 0.025 },
+];

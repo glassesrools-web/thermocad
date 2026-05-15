@@ -7,6 +7,7 @@ import {
   LAME_OPTS,
   CADRE_OPTS,
   MATERIAU_OPTS,
+  ISOLANT_OPTS,
   gKV,
   gKP,
 } from "./dtrMaterials.js";
@@ -1051,6 +1052,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           // DTR C3.2 default — Double paroi brique (10+air+10)
           composition: DTR_DEFAULT_WALL_PRESET,
           uValue: DTR_DEFAULT_WALL_U,
+          isolantMat:       w.isolantMat       || "aucun",
+          isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
@@ -1782,6 +1785,37 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Surface brute"  val={`${w.grossArea.toFixed(3)} m²`} col="#a78bfa" />
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
+
+                            {/* NOUVEAU: Isolation Thermique */}
+                            <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Isolation (Optionnel)</div>
+                              <select
+                                value={w.isolantMat || "aucun"}
+                                onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, isolantMat: e.target.value }))}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginBottom: 6
+                                }}
+                              >
+                                {ISOLANT_OPTS.map(o => (
+                                  <option key={o.val} value={o.val}>{o.label}</option>
+                                ))}
+                              </select>
+                              {w.isolantMat && w.isolantMat !== "aucun" && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span style={{ color: "#3a5570", fontSize: 10 }}>Épaisseur:</span>
+                                  <input type="number" min="0.01" max="0.5" step="0.01"
+                                    value={w.isolantEpaisseur || 0.05}
+                                    onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, isolantEpaisseur: parseFloat(e.target.value) || 0 }))}
+                                    style={{
+                                      width: 60, background: "#08101a", border: "1px solid #1a2d40",
+                                      borderRadius: 4, color: "#fbbf24", fontSize: 11, padding: "2px 4px", textAlign: "center"
+                                    }}
+                                  />
+                                  <span style={{ color: "#3a5570", fontSize: 10 }}>m</span>
+                                </div>
+                              )}
+                            </div>
 
                             {/* DTR C3.2 — Wall material preset */}
                             <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
