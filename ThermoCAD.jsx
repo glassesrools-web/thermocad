@@ -112,7 +112,7 @@ const pointInPolygon = (pt, polygon) => {
 const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) => {
   if (currentWalls.length < 3) return existingRooms;
 
-  const EPS = 3; 
+  const EPS = 3;
   const verts = [];
   const getVIdx = (x, y) => {
     for (let i = 0; i < verts.length; i++)
@@ -121,8 +121,37 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
     return verts.length - 1;
   };
 
-  const halfEdges = [];
+  // T-Junction splitting: register every endpoint first so intermediate
+  // vertices are known, then subdivide walls that pass through them.
+  currentWalls.forEach(w => { getVIdx(w.x1, w.y1); getVIdx(w.x2, w.y2); });
+
+  const splitWalls = [];
   currentWalls.forEach(w => {
+    const ax = w.x1, ay = w.y1, bx = w.x2, by = w.y2;
+    const len2 = (bx - ax) ** 2 + (by - ay) ** 2;
+    if (len2 < 1) return;
+    const splits = [];
+    verts.forEach((v, vi) => {
+      if ((Math.abs(v.x - ax) < EPS && Math.abs(v.y - ay) < EPS) ||
+          (Math.abs(v.x - bx) < EPS && Math.abs(v.y - by) < EPS)) return;
+      const t = ((v.x - ax) * (bx - ax) + (v.y - ay) * (by - ay)) / len2;
+      if (t <= 0 || t >= 1) return;
+      const px = ax + t * (bx - ax), py = ay + t * (by - ay);
+      if (Math.abs(px - v.x) < EPS && Math.abs(py - v.y) < EPS) splits.push({ t, vi });
+    });
+    if (!splits.length) { splitWalls.push(w); return; }
+    splits.sort((a, b) => a.t - b.t);
+    let prevX = ax, prevY = ay;
+    splits.forEach(({ vi }) => {
+      const { x: nx, y: ny } = verts[vi];
+      splitWalls.push({ ...w, x1: prevX, y1: prevY, x2: nx, y2: ny });
+      prevX = nx; prevY = ny;
+    });
+    splitWalls.push({ ...w, x1: prevX, y1: prevY, x2: bx, y2: by });
+  });
+
+  const halfEdges = [];
+  splitWalls.forEach(w => {
     const a = getVIdx(w.x1, w.y1);
     const b = getVIdx(w.x2, w.y2);
     if (a !== b) {
@@ -169,12 +198,13 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
       const n = pts[(j + 1) % pts.length];
       area2 += pts[j].x * n.y - n.x * pts[j].y;
     }
-    if (area2 > 0)
-      faces.push({ pts, areaM2: parseFloat((area2 / 2 / (SC * SC)).toFixed(3)), wallIds: [...faceWallIds] });
+    // Filter micro-rooms smaller than 0.1 m²
+    const areaM2 = area2 / 2 / (SC * SC);
+    if (area2 > 0 && areaM2 >= 0.1)
+      faces.push({ pts, areaM2: parseFloat(areaM2.toFixed(3)), wallIds: [...faceWallIds] });
   }
 
   const usedExisting = new Set();
-  let newCount = 0;
   return faces.map(face => {
     let matched = null;
     for (const rm of existingRooms) {
@@ -196,15 +226,17 @@ const detectRoomsFromGraph = (currentWalls, existingRooms, defaultH, rRefObj) =>
     }
     if (matched) {
       usedExisting.add(matched.id);
-      return { ...matched, points: face.pts, area: face.areaM2, wallIds: face.wallIds };
+      // Strip virtual T-junction split IDs; keep only real wall IDs
+      const realIds = face.wallIds.filter(id => currentWalls.some(w => w.id === id));
+      return { ...matched, points: face.pts, area: face.areaM2, wallIds: realIds };
     }
     const ci = ++rRefObj.current;
-    newCount++;
     return {
       id: `r${ci}`, name: `Pièce ${ci}`,
       points: face.pts, area: face.areaM2,
       colorIdx: ci, color: roomHsl(ci),
-      roomHeight: defaultH, wallIds: face.wallIds,
+      roomHeight: defaultH,
+      wallIds: face.wallIds.filter(id => currentWalls.some(w => w.id === id)),
     };
   });
 };
@@ -1050,11 +1082,46 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
         };
       }),
+      // ── Horizontal elements (per room) with thermal bridges ────────────
+      ...rooms.map((rm) => {
+        const perim = wallsEnriched
+          .filter(w => (rm.wallIds || []).includes(w.id))
+          .reduce((sum, w) => sum + (w.length || 0), 0);
+        return {
+          id: `cad-floor-${rm.id}`,
+          group: "floor",
+          elementType: "Plancher (" + rm.name + ")",
+          area: rm.area || 0,
+          composition: DTR_DEFAULT_FLOOR_PRESET,
+          uValue: DTR_DEFAULT_FLOOR_U,
+          bridgeLength: parseFloat(perim.toFixed(2)),
+          psi: 0.45,
+          roomId: rm.id,
+          roomName: rm.name,
+        };
+      }),
+      ...rooms.map((rm) => {
+        const perim = wallsEnriched
+          .filter(w => (rm.wallIds || []).includes(w.id))
+          .reduce((sum, w) => sum + (w.length || 0), 0);
+        return {
+          id: `cad-roof-${rm.id}`,
+          group: "roof",
+          elementType: "Toiture (" + rm.name + ")",
+          area: rm.area || 0,
+          composition: DTR_DEFAULT_ROOF_PRESET,
+          uValue: DTR_DEFAULT_ROOF_U,
+          bridgeLength: parseFloat(perim.toFixed(2)),
+          psi: 0.45,
+          roomId: rm.id,
+          roomName: rm.name,
+        };
+      }),
     ];
     onExportSurfaces(data);
     setInfo("✅ Exporté avec succès (Ponts auto-calculés) !");
     setTimeout(() => setInfo(""), 2500);
-  }, [wallsEnriched, doors, wins, walls, onExportSurfaces]);
+  }, [wallsEnriched, doors, wins, walls, rooms, onExportSurfaces]);
 
   const S = {
     card: { background: "#0c1a28", borderRadius: 8, padding: "10px 12px", border: "1px solid #152030", marginBottom: 8 },

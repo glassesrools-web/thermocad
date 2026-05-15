@@ -514,9 +514,12 @@ export default function RoomEditor({
                         <div className="md:col-span-2">
                           <label className="text-xs font-medium opacity-80">Coefficient K (saisie manuelle, W/m²K)</label>
                           <input
-                            type="number" step="0.01"
+                            type="number" step="0.01" min="0"
                             value={surf.uValue ?? ""}
-                            onChange={(e) => onUpdateSurface(surf.id, { uValue: Number(e.target.value) })}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                            }}
                             className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
                           />
                         </div>
@@ -561,9 +564,12 @@ export default function RoomEditor({
                         <div className="md:col-span-2">
                           <label className="text-xs font-medium opacity-80">Coefficient K (saisie manuelle, W/m²K)</label>
                           <input
-                            type="number" step="0.01"
+                            type="number" step="0.01" min="0"
                             value={surf.uValue ?? ""}
-                            onChange={(e) => onUpdateSurface(surf.id, { uValue: Number(e.target.value) })}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                            }}
                             className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
                           />
                         </div>

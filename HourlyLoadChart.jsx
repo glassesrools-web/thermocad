@@ -7,6 +7,23 @@ export default function HourlyLoadChart({ data }) {
     ? chartData.reduce((max, item) => Math.max(max, item.load ?? 0), 0)
     : 0;
 
+  // Graceful empty-state: recharts crashes on a completely empty dataset
+  if (chartData.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h4 className="text-lg font-semibold" style={{ color: "var(--glass-text)" }}>24-Hour Heat Load Profile (Building Total)</h4>
+        <div
+          className="h-64 sm:h-72 md:h-80 w-full min-h-[200px] flex items-center justify-center rounded-xl border"
+          style={{ borderColor: "var(--glass-border)", background: "var(--input-bg)" }}
+        >
+          <p className="text-sm opacity-50" style={{ color: "var(--glass-text)" }}>
+            No hourly data available. Run a calculation first.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <h4 className="text-lg font-semibold" style={{ color: "var(--glass-text)" }}>24-Hour Heat Load Profile (Building Total)</h4>
