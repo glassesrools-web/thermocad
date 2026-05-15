@@ -12,6 +12,7 @@ import {
   LAME_OPTS,
   CADRE_OPTS,
   MATERIAU_OPTS,
+  ISOLANT_OPTS,
   gKV,
   gKP,
 } from "./dtrMaterials.js";
@@ -446,6 +447,56 @@ export default function RoomEditor({
                           />
                         </div>
                       )}
+                      {/* ── Insulation controls ── */}
+                      <div
+                        className="mt-1 p-2 rounded-lg space-y-1"
+                        style={{ background: "var(--glass-accent-bg)", border: "1px solid var(--glass-border)" }}
+                      >
+                        <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--glass-text)", opacity: 0.7 }}>
+                          Isolant thermique
+                        </label>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <select
+                            className="glass-input text-[11px] px-1.5 py-1 rounded flex-1 min-w-[120px]"
+                            value={surf.isolantMat || "aucun"}
+                            onChange={(e) => onUpdateSurface(surf.id, { isolantMat: e.target.value })}
+                          >
+                            {ISOLANT_OPTS.map((opt) => (
+                              <option key={opt.val} value={opt.val} style={{ background: "var(--app-bg-color)" }}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          {surf.isolantMat && surf.isolantMat !== "aucun" && (
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                className="glass-input w-16 text-[11px] px-1.5 py-1 rounded"
+                                value={surf.isolantEpaisseur ?? 0.05}
+                                onChange={(e) =>
+                                  onUpdateSurface(surf.id, { isolantEpaisseur: parseFloat(e.target.value) || 0.05 })
+                                }
+                                title="Épaisseur en mètres (ex: 0.05 pour 5cm)"
+                              />
+                              <span className="text-[10px]" style={{ color: "var(--glass-text)", opacity: 0.6 }}>m</span>
+                            </div>
+                          )}
+                        </div>
+                        {/* Effective U after insulation */}
+                        {surf.isolantMat && surf.isolantMat !== "aucun" && Number(surf.uValue) > 0 && (() => {
+                          const isolant = ISOLANT_OPTS.find((o) => o.val === surf.isolantMat);
+                          if (!isolant?.lambda) return null;
+                          const ep = parseFloat(surf.isolantEpaisseur) || 0.05;
+                          const uEff = 1 / (1 / Number(surf.uValue) + ep / isolant.lambda);
+                          return (
+                            <p className="text-[11px] font-mono font-semibold" style={{ color: "var(--glass-primary)" }}>
+                              U effectif = {uEff.toFixed(3)} W/m²K
+                            </p>
+                          );
+                        })()}
+                      </div>
                     </div>
                   )}
 
