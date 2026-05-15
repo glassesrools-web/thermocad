@@ -337,11 +337,18 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new window.Image();
-      img.onload = () => setBgImage(img);
+      img.onload = () => {
+        setBgImage(img);
+        // Anchor image to world-space centre so it doesn't shift on canvas resize
+        if (cvsWrapRef.current) {
+          setBgOffsetX(cvsWrapRef.current.clientWidth  / 2 - pan.x);
+          setBgOffsetY(cvsWrapRef.current.clientHeight / 2 - pan.y);
+        }
+      };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [pan]);
 
   const wallsEnriched = useMemo(() =>
     walls.map(w => {
@@ -433,7 +440,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     });
   }, [getSnapshot]);
 
-  const getSnap = useCallback((x, y) => {
+  const getSnap = useCallback((x, y, e = null) => {
+    // Alt key held → bypass all snapping, return raw cursor position
+    if (e && e.altKey) return { x, y, type: "free" };
     const p = { x, y };
     const epMap = new Map();
     walls.forEach(w => {
@@ -465,11 +474,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         if (ady < SR * 1.2 && adx > ady * 1.5) return { x, y: L.y, type: "ortho" };
       }
     }
-    const gx = Math.round(x / SC) * SC, gy = Math.round(y / SC) * SC;
-    if (Math.abs(x - gx) < SR * 0.6 && Math.abs(y - gy) < SR * 0.6)
-      return { x: gx, y: gy, type: "grid" };
+    // Grid snap only when grid is visible
+    if (showGrid) {
+      const gx = Math.round(x / SC) * SC, gy = Math.round(y / SC) * SC;
+      if (Math.abs(x - gx) < SR * 0.6 && Math.abs(y - gy) < SR * 0.6)
+        return { x: gx, y: gy, type: "grid" };
+    }
     return { x, y, type: "free" };
-  }, [walls, poly]);
+  }, [walls, poly, showGrid]);
 
   const applyKeyLength = useCallback((metres) => {
     if (!poly.length || !sp) return null;
@@ -491,7 +503,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const scaleY = cvs.current.height / r.height;
     const s = getSnap(
       (e.clientX - r.left) * scaleX - pan.x,
-      (e.clientY - r.top)  * scaleY - pan.y
+      (e.clientY - r.top)  * scaleY - pan.y,
+      e
     );
     setSp(s);
     if (poly.length > 0 && s) {
@@ -515,7 +528,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const scaleY = cvs.current.height / rect.height;
     const px = (e.clientX - rect.left) * scaleX - pan.x;
     const py = (e.clientY - rect.top)  * scaleY - pan.y;
-    let s = getSnap(px, py);
+    let s = getSnap(px, py, e);
 
     if (mode === "select") {
       let hit = null;
@@ -759,8 +772,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       ctx.globalAlpha = bgOpacity;
       const imgW = bgImage.width * bgScale;
       const imgH = bgImage.height * bgScale;
-      const drawX = (W - imgW) / 2 + bgOffsetX;
-      const drawY = (H - imgH) / 2 + bgOffsetY;
+      const drawX = bgOffsetX - imgW / 2;
+      const drawY = bgOffsetY - imgH / 2;
       ctx.drawImage(bgImage, drawX, drawY, imgW, imgH);
       ctx.restore();
     }
