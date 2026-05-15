@@ -1,6 +1,6 @@
 import React from "react";
 import { Plus, Trash2, ChevronDown, ChevronRight, Building2, DoorOpen, LayoutDashboard } from "lucide-react";
-import { WILAYAS } from "./algeria_climate.js";
+import { WILAYAS } from "../../data/algeria_climate.js";
 
 const PROJECT_SUMMARY_ID = "__project_summary__";
 
