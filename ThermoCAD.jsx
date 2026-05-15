@@ -1036,24 +1036,30 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       return;
     }
     const data = [
-      ...wallsEnriched.map((w) => ({
-        id: `cad-wall-${w.id}`,
-        group: "vertical",
-        elementType: "Mur Extérieur",
-        width: w.length,
-        height: w.height || DEFAULT_H,
-        area: w.netArea,
-        orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
-        bridgeLength: w.length,
-        psi: 0.45,
-        // DTR C3.2 default — Double paroi brique (10+air+10)
-        composition: DTR_DEFAULT_WALL_PRESET,
-        uValue: DTR_DEFAULT_WALL_U,
-      })),
+      ...wallsEnriched.map((w) => {
+        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
+        return {
+          id: `cad-wall-${w.id}`,
+          group: "vertical",
+          elementType: "Mur Extérieur",
+          width: w.length,
+          height: w.height || DEFAULT_H,
+          area: w.netArea,
+          orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
+          bridgeLength: w.length,
+          psi: 0.45,
+          // DTR C3.2 default — Double paroi brique (10+air+10)
+          composition: DTR_DEFAULT_WALL_PRESET,
+          uValue: DTR_DEFAULT_WALL_U,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
+        };
+      }),
       ...doors.map((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const w = walls.find(wl => wl.id === d.wid);
+        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
         return {
           id: `cad-door-${d.id}`,
           group: "vertical",
@@ -1064,12 +1070,15 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
       }),
       ...wins.map((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const w = walls.find(wl => wl.id === wv.wid);
+        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
         return {
           id: `cad-win-${wv.id}`,
           group: "vertical",
@@ -1080,6 +1089,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
+          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomName: ownerRoom ? ownerRoom.name : "Non assigné",
         };
       }),
       // ── Horizontal elements (per room) with thermal bridges ────────────
