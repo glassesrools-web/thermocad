@@ -1050,17 +1050,19 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       return;
     }
     const data = [
-      ...wallsEnriched.map((w) => {
+      ...wallsEnriched.flatMap((w) => {
         const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
         const sharedRooms = rooms.filter(r => (r.wallIds || []).includes(w.id)).length;
         let typeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
         if (w.contactOverride === "ext") typeStr = "Mur Extérieur";
         if (w.contactOverride === "int") typeStr = "Mur Intérieur";
-        if (w.contactOverride === "lnc") typeStr = "Mur LNC";
-        return {
+        if (w.contactOverride === "lnc") typeStr = "Mur Intérieur (LNC)";
+        if (typeStr === "Mur Intérieur") return [];
+        return [{
           id: `cad-wall-${w.id}`,
           group: "vertical",
           elementType: typeStr,
+          contact: typeStr === "Mur Intérieur (LNC)" ? "LNC" : "EXT",
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
@@ -1074,17 +1076,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...doors.map((d) => {
+      ...doors.flatMap((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const w = walls.find(wl => wl.id === d.wid);
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const sharedRooms = w ? rooms.filter(r => (r.wallIds || []).includes(w.id)).length : 0;
+        let parentTypeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        if (w?.contactOverride === "ext") parentTypeStr = "Mur Extérieur";
+        if (w?.contactOverride === "int") parentTypeStr = "Mur Intérieur";
+        if (w?.contactOverride === "lnc") parentTypeStr = "Mur Intérieur (LNC)";
+        if (parentTypeStr === "Mur Intérieur") return [];
+        return [{
           id: `cad-door-${d.id}`,
           group: "vertical",
           elementType: "Porte",
+          contact: parentTypeStr === "Mur Intérieur (LNC)" ? "LNC" : "EXT",
           width: dw,
           height: dh,
           area: dw * dh,
@@ -1093,17 +1102,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...wins.map((wv) => {
+      ...wins.flatMap((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const w = walls.find(wl => wl.id === wv.wid);
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const sharedRooms = w ? rooms.filter(r => (r.wallIds || []).includes(w.id)).length : 0;
+        let parentTypeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        if (w?.contactOverride === "ext") parentTypeStr = "Mur Extérieur";
+        if (w?.contactOverride === "int") parentTypeStr = "Mur Intérieur";
+        if (w?.contactOverride === "lnc") parentTypeStr = "Mur Intérieur (LNC)";
+        if (parentTypeStr === "Mur Intérieur") return [];
+        return [{
           id: `cad-win-${wv.id}`,
           group: "vertical",
           elementType: "Fenêtre",
+          contact: parentTypeStr === "Mur Intérieur (LNC)" ? "LNC" : "EXT",
           width: vw,
           height: vh,
           area: vw * vh,
@@ -1112,7 +1128,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
       // ── Horizontal elements (per room) with thermal bridges ────────────
       ...rooms.map((rm) => {
