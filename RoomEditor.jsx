@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { LayoutGrid, Plus, Trash2 } from "lucide-react";
+import { LayoutGrid, Plus, Trash2, CopyCheck } from "lucide-react";
 import Field from "./Field.jsx";
 import Section from "./Section.jsx";
 import { calculateRoomLosses } from "../../utils/dtrMath";
@@ -151,6 +151,7 @@ export default function RoomEditor({
   onUpdateSurface,
   onRemoveSurface,
   onImportSurfaces,
+  onApplyToAll,
 }) {
   const [activeTab, setActiveTab] = useState("vertical");
 
@@ -447,12 +448,26 @@ export default function RoomEditor({
                       {opaqueMatSelectValue === "manuel" && (
                         <div>
                           <label className="text-xs font-medium opacity-80">Résistance R (saisie manuelle, m²K/W)</label>
-                          <input
-                            type="number" step="0.01"
-                            value={surf.rValue ?? ""}
-                            onChange={(e) => onUpdateSurface(surf.id, { rValue: Number(e.target.value) })}
-                            className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                          />
+                          <div className="flex items-center gap-1 mt-1">
+                            <input
+                              type="number" step="0.01"
+                              value={surf.rValue ?? ""}
+                              onChange={(e) => onUpdateSurface(surf.id, { rValue: Number(e.target.value) })}
+                              className="glass-input w-full rounded-md px-2 py-1.5 text-sm"
+                            />
+                            <button
+                              title="Appliquer à tous"
+                              onClick={() => onApplyToAll(surf.elementType, {
+                                composition: surf.composition,
+                                rValue: surf.rValue,
+                                isolantMat: surf.isolantMat,
+                                isolantEpaisseur: surf.isolantEpaisseur,
+                              })}
+                              className="shrink-0 rounded-md p-1.5 text-xs opacity-60 hover:opacity-100 hover:bg-white/10 transition"
+                            >
+                              <CopyCheck size={14} />
+                            </button>
+                          </div>
                         </div>
                       )}
                       {/* ── Insulation controls ── */}
@@ -572,15 +587,29 @@ export default function RoomEditor({
                       {surf.winType === "manuel" && (
                         <div className="md:col-span-2">
                           <label className="text-xs font-medium opacity-80">Coefficient K (saisie manuelle, W/m²K)</label>
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={surf.uValue ?? ""}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
-                            }}
-                            className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                          />
+                          <div className="flex items-center gap-1 mt-1">
+                            <input
+                              type="number" step="0.01" min="0"
+                              value={surf.uValue ?? ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                              }}
+                              className="glass-input w-full rounded-md px-2 py-1.5 text-sm"
+                            />
+                            <button
+                              title="Appliquer à tous"
+                              onClick={() => onApplyToAll(surf.elementType, {
+                                uValue: surf.uValue,
+                                winType: surf.winType,
+                                winLame: surf.winLame,
+                                winCadre: surf.winCadre,
+                              })}
+                              className="shrink-0 rounded-md p-1.5 text-xs opacity-60 hover:opacity-100 hover:bg-white/10 transition"
+                            >
+                              <CopyCheck size={14} />
+                            </button>
+                          </div>
                         </div>
                       )}
                     </>
@@ -622,15 +651,27 @@ export default function RoomEditor({
                       {surf.doorMat === "manuel" && (
                         <div className="md:col-span-2">
                           <label className="text-xs font-medium opacity-80">Coefficient K (saisie manuelle, W/m²K)</label>
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={surf.uValue ?? ""}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
-                            }}
-                            className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
-                          />
+                          <div className="flex items-center gap-1 mt-1">
+                            <input
+                              type="number" step="0.01" min="0"
+                              value={surf.uValue ?? ""}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                              }}
+                              className="glass-input w-full rounded-md px-2 py-1.5 text-sm"
+                            />
+                            <button
+                              title="Appliquer à tous"
+                              onClick={() => onApplyToAll(surf.elementType, {
+                                uValue: surf.uValue,
+                                doorMat: surf.doorMat,
+                              })}
+                              className="shrink-0 rounded-md p-1.5 text-xs opacity-60 hover:opacity-100 hover:bg-white/10 transition"
+                            >
+                              <CopyCheck size={14} />
+                            </button>
+                          </div>
                         </div>
                       )}
                     </>

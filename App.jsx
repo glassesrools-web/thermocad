@@ -89,6 +89,21 @@ export default function App() {
   const importSurfaces = useCallback((localId, roomId, surfaces) => { if (!Array.isArray(surfaces) || surfaces.length === 0) return; setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: [...(r.surfaces ?? []), ...surfaces] } : r ) }; }) })); }, []);
   const updateSurface = useCallback((localId, roomId, surfaceId, updates) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => { if (r.id !== roomId) return r; return { ...r, surfaces: (r.surfaces ?? []).map((s) => s.id === surfaceId ? { ...s, ...updates } : s ) }; }) }; }) })); }, []);
   const removeSurface = useCallback((localId, roomId, surfaceId) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: (r.surfaces ?? []).filter((s) => s.id !== surfaceId) } : r ) }; }) })); }, []);
+  const applySurfaceToAll = useCallback((elementType, updates) => {
+    if (!window.confirm(`Voulez-vous vraiment appliquer ces propriétés à tous les éléments de type « ${elementType} » dans toutes les pièces du projet ?`)) return;
+    setProject((p) => ({
+      ...p,
+      locals: (p.locals ?? []).map((l) => ({
+        ...l,
+        rooms: (l.rooms ?? []).map((r) => ({
+          ...r,
+          surfaces: (r.surfaces ?? []).map((s) =>
+            s.elementType === elementType ? { ...s, ...updates } : s
+          ),
+        })),
+      })),
+    }));
+  }, []);
 
   const handleExport = useCallback((cadSurfaces) => {
     if (!Array.isArray(cadSurfaces) || cadSurfaces.length === 0) return;
@@ -380,7 +395,7 @@ export default function App() {
             )}
 
             {isRoomActive && activeRoom && activeLocal && (
-              <RoomEditor room={activeRoom} localName={activeLocal.name} project={project} onRoomChange={(updates) => updateRoom(activeId.localId, activeId.roomId, updates)} onAddSurface={(group) => addSurface(activeId.localId, activeId.roomId, group)} onUpdateSurface={(surfaceId, updates) => updateSurface(activeId.localId, activeId.roomId, surfaceId, updates)} onRemoveSurface={(surfaceId) => removeSurface(activeId.localId, activeId.roomId, surfaceId)} onImportSurfaces={(surfaces) => importSurfaces(activeId.localId, activeId.roomId, surfaces)} />
+              <RoomEditor room={activeRoom} localName={activeLocal.name} project={project} onRoomChange={(updates) => updateRoom(activeId.localId, activeId.roomId, updates)} onAddSurface={(group) => addSurface(activeId.localId, activeId.roomId, group)} onUpdateSurface={(surfaceId, updates) => updateSurface(activeId.localId, activeId.roomId, surfaceId, updates)} onRemoveSurface={(surfaceId) => removeSurface(activeId.localId, activeId.roomId, surfaceId)} onImportSurfaces={(surfaces) => importSurfaces(activeId.localId, activeId.roomId, surfaces)} onApplyToAll={applySurfaceToAll} />
             )}
 
             {isLocalActive && activeLocal && (
