@@ -29,8 +29,8 @@
  *   LNC contact (both sides interior-like):       Rs_int = 0.13,  Rs_lnc = 0.13
  */
 
-import { ISOLANT_OPTS } from "./dtrMaterials.js";
-import { WILAYAS, CLIMATE_ZONES } from "./algeria_climate.js";
+import { ISOLANT_OPTS } from "../data/dtrMaterials.js";
+import { WILAYAS, CLIMATE_ZONES } from "../data/algeria_climate.js";
 
 // ─── DTR C3.2 Surface Resistances (m²K/W) ────────────────────────────────────
 const RS = {
