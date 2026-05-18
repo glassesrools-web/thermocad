@@ -1853,7 +1853,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                   <span style={{ color: "#3a5570", fontSize: 10 }}>Épaisseur:</span>
                                   <input type="number" min="0.01" max="0.5" step="0.01"
                                     value={w.isolantEpaisseur || 0.05}
-                                    onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, isolantEpaisseur: parseFloat(e.target.value) || 0 }))}
+                                    onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, isolantEpaisseur: e.target.value }))}
                                     style={{
                                       width: 60, background: "#08101a", border: "1px solid #1a2d40",
                                       borderRadius: 4, color: "#fbbf24", fontSize: 11, padding: "2px 4px", textAlign: "center"
@@ -1918,7 +1918,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               {isManualWall && (
                                 <input type="number" min="0.01" max="20" step="0.01"
                                   value={w.rValue ?? ""}
-                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, rValue: parseFloat(e.target.value) || 0 }))}
+                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, rValue: e.target.value }))}
                                   placeholder="R manuel (m²K/W)"
                                   style={{
                                     width: "100%", background: "#122032", border: "1px solid #1f3248",

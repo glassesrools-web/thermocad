@@ -175,34 +175,34 @@ export function calculateRoomLosses(project, room) {
       !typeName.startsWith("Porte");
 
     if (contact !== "SOL" && isOpaque) {
-      if (typeof s.rValue === "number" && s.rValue > 0) {
+      if (Number(s.rValue) > 0) {
         // R-based path (new presets)
         U_eff = resolveU(s.rValue, group, contact, s.isolantMat, s.isolantEpaisseur);
-      } else if (typeof s.uValue === "number" && s.uValue > 0) {
+      } else if (Number(s.uValue) > 0) {
         // Legacy U path (old surfaces or imports from CAD without rValue)
         // Apply insulation on top if present
         if (s.isolantMat && s.isolantMat !== "aucun" && Number(s.isolantEpaisseur) > 0) {
           const opt = ISOLANT_OPTS.find((o) => o.val === s.isolantMat);
           if (opt && opt.lambda > 0) {
             const r_iso  = Number(s.isolantEpaisseur) / opt.lambda;
-            const r_base = 1 / s.uValue;
+            const r_base = 1 / Number(s.uValue);
             U_eff = 1 / (r_base + r_iso);
           } else {
-            U_eff = s.uValue;
+            U_eff = Number(s.uValue);
           }
         } else {
-          U_eff = s.uValue;
+          U_eff = Number(s.uValue);
         }
       }
     } else if (!isOpaque) {
       // Windows & doors use U/K directly (no surface resistance adjustment)
-      U_eff = typeof s.uValue === "number" && s.uValue > 0 ? s.uValue : 0;
+      U_eff = Number(s.uValue) > 0 ? Number(s.uValue) : 0;
     } else if (contact === "SOL") {
       // Ground-floor (Sur Terre-Plein etc.): use rValue or uValue directly
-      if (typeof s.rValue === "number" && s.rValue > 0) {
+      if (Number(s.rValue) > 0) {
         U_eff = resolveU(s.rValue, "floor", "EXT", s.isolantMat, s.isolantEpaisseur);
-      } else if (typeof s.uValue === "number" && s.uValue > 0) {
-        U_eff = s.uValue;
+      } else if (Number(s.uValue) > 0) {
+        U_eff = Number(s.uValue);
       }
     }
 

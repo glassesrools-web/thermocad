@@ -499,7 +499,7 @@ export default function RoomEditor({
                                 className="glass-input w-16 text-[11px] px-1.5 py-1 rounded"
                                 value={surf.isolantEpaisseur ?? 0.05}
                                 onChange={(e) =>
-                                  onUpdateSurface(surf.id, { isolantEpaisseur: parseFloat(e.target.value) || 0.05 })
+                                  onUpdateSurface(surf.id, { isolantEpaisseur: e.target.value })
                                 }
                                 title="Épaisseur en mètres (ex: 0.05 pour 5cm)"
                               />
@@ -511,7 +511,7 @@ export default function RoomEditor({
                         {surf.isolantMat && surf.isolantMat !== "aucun" && Number(surf.uValue) > 0 && (() => {
                           const isolant = ISOLANT_OPTS.find((o) => o.val === surf.isolantMat);
                           if (!isolant?.lambda) return null;
-                          const ep = parseFloat(surf.isolantEpaisseur) || 0.05;
+                          const ep = Number(surf.isolantEpaisseur) || 0.05;
                           const uEff = 1 / (1 / Number(surf.uValue) + ep / isolant.lambda);
                           return (
                             <p className="text-[11px] font-mono font-semibold" style={{ color: "var(--glass-primary)" }}>
@@ -593,7 +593,7 @@ export default function RoomEditor({
                               value={surf.uValue ?? ""}
                               onChange={(e) => {
                                 const raw = e.target.value;
-                                onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                                onUpdateSurface(surf.id, { uValue: raw });
                               }}
                               className="glass-input w-full rounded-md px-2 py-1.5 text-sm"
                             />
@@ -657,7 +657,7 @@ export default function RoomEditor({
                               value={surf.uValue ?? ""}
                               onChange={(e) => {
                                 const raw = e.target.value;
-                                onUpdateSurface(surf.id, { uValue: raw === "" ? "" : parseFloat(raw) });
+                                onUpdateSurface(surf.id, { uValue: raw });
                               }}
                               className="glass-input w-full rounded-md px-2 py-1.5 text-sm"
                             />
