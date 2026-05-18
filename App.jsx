@@ -91,6 +91,7 @@ export default function App() {
   const removeSurface = useCallback((localId, roomId, surfaceId) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: (r.surfaces ?? []).filter((s) => s.id !== surfaceId) } : r ) }; }) })); }, []);
   const applySurfaceToAll = useCallback((elementType, updates) => {
     if (!window.confirm(`Voulez-vous vraiment appliquer ces propriétés à tous les éléments de type « ${elementType} » dans toutes les pièces du projet ?`)) return;
+    const patch = { ...updates };
     setProject((p) => ({
       ...p,
       locals: (p.locals ?? []).map((l) => ({
@@ -98,7 +99,7 @@ export default function App() {
         rooms: (l.rooms ?? []).map((r) => ({
           ...r,
           surfaces: (r.surfaces ?? []).map((s) =>
-            s.elementType === elementType ? { ...s, ...updates } : s
+            s.elementType === elementType ? { ...s, ...patch } : { ...s }
           ),
         })),
       })),

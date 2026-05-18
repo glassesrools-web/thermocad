@@ -198,7 +198,10 @@ export default function RoomEditor({
     const type  = field === "winType"  ? value : (s.winType  || DEFAULT_WIN_TYPE);
     const lame  = field === "winLame"  ? value : (s.winLame  || DEFAULT_WIN_LAME);
     const cadre = field === "winCadre" ? value : (s.winCadre || DEFAULT_WIN_CADRE);
-    if (type !== "manuel" && cadre !== "manuel" && lame !== "manuel") {
+    if (type === "manuel") {
+      // Clear any auto-computed value so the manual input starts empty and editable
+      updates.uValue = "";
+    } else if (cadre !== "manuel" && lame !== "manuel") {
       const u = safeKV(type, lame, cadre);
       if (u !== null) updates.uValue = u;
     }
@@ -209,7 +212,10 @@ export default function RoomEditor({
     const updates = { [field]: value };
     const mat     = field === "doorMat" ? value : (s.doorMat || DEFAULT_DOOR_MAT);
     const contact = String(s.contact ?? "EXT").toUpperCase() === "LNC" ? "lnc" : "exterieur";
-    if (mat !== "manuel") {
+    if (mat === "manuel") {
+      // Clear any auto-computed value so the manual input starts empty and editable
+      updates.uValue = "";
+    } else {
       const u = safeKP(mat, contact);
       if (u !== null) updates.uValue = u;
     }
