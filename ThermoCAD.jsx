@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  PRESETS_MURS,
-  PRESETS_TOITURES,
-  PRESETS_PLANCHERS,
+  WALL_R_PRESETS,
+  ROOF_R_PRESETS,
+  FLOOR_R_PRESETS,
   VITRAGE_OPTS,
   LAME_OPTS,
   CADRE_OPTS,
@@ -12,13 +12,16 @@ import {
   gKP,
 } from "../data/dtrMaterials.js";
 
-// Local DTR-C3.2 default values (match dtrMaterials.js keys)
-const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";
-const DTR_DEFAULT_WALL_U      = 1.28;
-const DTR_DEFAULT_ROOF_PRESET = "terrasse_isol_8cm";
-const DTR_DEFAULT_ROOF_U      = 0.48;
-const DTR_DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm";
-const DTR_DEFAULT_FLOOR_U     = 2.70;
+// Local DTR-C3.2 default values — index into the new R-preset arrays
+// Index 14 = "Double paroi brique 10+10 (lame d'air 4cm)"  R=0.48
+// Index 4  = "Dalle + laine de roche 8cm"                  R=2.08
+// Index 4  = "Dalle + polystyrène 4cm + chape"             R=1.08
+const DTR_DEFAULT_WALL_PRESET_IDX  = 14;  // WALL_R_PRESETS[14]
+const DTR_DEFAULT_WALL_R           = 0.48;
+const DTR_DEFAULT_ROOF_PRESET_IDX  = 7;   // ROOF_R_PRESETS[7]  Dalle + laine 8cm
+const DTR_DEFAULT_ROOF_R           = 2.08;
+const DTR_DEFAULT_FLOOR_PRESET_IDX = 4;   // FLOOR_R_PRESETS[4] Dalle + poly 4cm + chape
+const DTR_DEFAULT_FLOOR_R          = 1.08;
 const DTR_DEFAULT_WIN_TYPE    = "double";
 const DTR_DEFAULT_WIN_LAME    = "10_11";
 const DTR_DEFAULT_WIN_CADRE   = "bois_pvc";
@@ -1058,6 +1061,13 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         if (w.contactOverride === "int") typeStr = "Mur Intérieur";
         if (w.contactOverride === "lnc") typeStr = "Mur Intérieur (LNC)";
         if (typeStr === "Mur Intérieur") return [];
+        // Use per-wall rValue if set, otherwise fall back to the default preset
+        const rVal = (typeof w.rValue === "number" && w.rValue > 0)
+          ? w.rValue
+          : DTR_DEFAULT_WALL_R;
+        const presetIdx = (typeof w.rValue === "number" && w.rValue > 0)
+          ? null
+          : DTR_DEFAULT_WALL_PRESET_IDX;
         return [{
           id: `cad-wall-${w.id}`,
           group: "vertical",
@@ -1069,9 +1079,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
           bridgeLength: w.length,
           psi: 0.45,
-          // DTR C3.2 default — Double paroi brique (10+air+10)
-          composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
+          // R-based: math engine will add Rs_int + Rs_ext and compute U = 1/R_total
+          composition: presetIdx !== null ? presetIdx : "manuel",
+          rValue: rVal,
           isolantMat:       w.isolantMat       || "aucun",
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
@@ -1140,8 +1150,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           group: "floor",
           elementType: "Plancher (" + rm.name + ")",
           area: rm.area || 0,
-          composition: DTR_DEFAULT_FLOOR_PRESET,
-          uValue: DTR_DEFAULT_FLOOR_U,
+          composition: DTR_DEFAULT_FLOOR_PRESET_IDX,
+          rValue: DTR_DEFAULT_FLOOR_R,
           bridgeLength: parseFloat(perim.toFixed(2)),
           psi: 0.45,
           roomId: rm.id,
@@ -1157,8 +1167,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           group: "roof",
           elementType: "Toiture (" + rm.name + ")",
           area: rm.area || 0,
-          composition: DTR_DEFAULT_ROOF_PRESET,
-          uValue: DTR_DEFAULT_ROOF_U,
+          composition: DTR_DEFAULT_ROOF_PRESET_IDX,
+          rValue: DTR_DEFAULT_ROOF_R,
           bridgeLength: parseFloat(perim.toFixed(2)),
           psi: 0.45,
           roomId: rm.id,
@@ -1801,9 +1811,12 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
                       {selected.type === "wall" && (() => {
                         const w = selectedEl;
-                        const wallPreset = w.composition || DTR_DEFAULT_WALL_PRESET;
-                        const isManualWall = wallPreset === "manuel" || !PRESETS_MURS.some(p => p.val === wallPreset);
-                        const resolvedPreset = isManualWall ? "manuel" : wallPreset;
+                        // New R-based preset: composition stores array index (number) or "manuel"
+                        const presetIdx = (typeof w.composition === "number")
+                          ? w.composition
+                          : (w.composition == null ? DTR_DEFAULT_WALL_PRESET_IDX : "manuel");
+                        const isManualWall = presetIdx === "manuel";
+                        const resolvedPreset = isManualWall ? "manuel" : String(presetIdx);
                         return (
                           <div>
                             <StatRow label="Longueur" val={`${w.length.toFixed(3)} m`} col="#60a5fa" />
@@ -1820,7 +1833,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
 
-                            {/* NOUVEAU: Isolation Thermique */}
+                            {/* Isolation Thermique */}
                             <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Isolation (Optionnel)</div>
                               <select
@@ -1869,39 +1882,44 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               </select>
                             </div>
 
-                            {/* DTR C3.2 — Wall material preset */}
+                            {/* DTR C3.2 — Wall material preset (R-based) */}
                             <div style={{ marginTop: 0, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau (DTR C3.2)</div>
                               <select
                                 value={resolvedPreset}
                                 onChange={e => {
                                   const val = e.target.value;
-                                  const preset = PRESETS_MURS.find(p => p.val === val);
-                                  setWalls(prev => prev.map(x => x.id !== w.id ? x : {
-                                    ...x,
-                                    composition: val,
-                                    ...(preset && preset.u !== "" ? { uValue: preset.u } : {}),
-                                  }));
+                                  if (val === "manuel") {
+                                    setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, composition: "manuel" }));
+                                  } else {
+                                    const idx = parseInt(val, 10);
+                                    const preset = WALL_R_PRESETS[idx];
+                                    setWalls(prev => prev.map(x => x.id !== w.id ? x : {
+                                      ...x,
+                                      composition: idx,
+                                      ...(preset && preset.R !== null ? { rValue: preset.R } : {}),
+                                    }));
+                                  }
                                 }}
                                 style={{
                                   width: "100%", background: "#122032", border: "1px solid #1f3248",
                                   borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
                                 }}
                               >
-                                {PRESETS_MURS.map(p => (
-                                  <option key={p.val} value={p.val}>{p.label}</option>
+                                {WALL_R_PRESETS.map((p, i) => (
+                                  <option key={i} value={p.R === null ? "manuel" : String(i)}>{p.label_fr}</option>
                                 ))}
                               </select>
-                              {resolvedPreset !== "manuel" && safeNum(w.uValue) !== null && (
+                              {!isManualWall && safeNum(w.rValue) !== null && (
                                 <div style={{ color: "#60a5fa", fontSize: 11, fontFamily: "monospace", marginTop: 4 }}>
-                                  U = {Number(w.uValue).toFixed(2)} W/m²K
+                                  R = {Number(w.rValue).toFixed(2)} m²K/W
                                 </div>
                               )}
-                              {resolvedPreset === "manuel" && (
-                                <input type="number" min="0.01" max="10" step="0.01"
-                                  value={w.uValue ?? ""}
-                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, uValue: Number(e.target.value) }))}
-                                  placeholder="U manuel (W/m²K)"
+                              {isManualWall && (
+                                <input type="number" min="0.01" max="20" step="0.01"
+                                  value={w.rValue ?? ""}
+                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, rValue: parseFloat(e.target.value) || 0 }))}
+                                  placeholder="R manuel (m²K/W)"
                                   style={{
                                     width: "100%", background: "#122032", border: "1px solid #1f3248",
                                     borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 4,

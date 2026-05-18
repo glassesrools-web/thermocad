@@ -1,335 +1,285 @@
 /**
- * DTR C3.2 — Thermal Loss Math Engine
- * Implements per-room heat loss calculation per DTR C3-2 (Algerian standard).
+ * dtrMath.js — DTR C3.2 Heat-Loss Calculation Engine
  *
  * Exports:
- *   calculateUWithInsulation(baseU, isolantMat, epaisseur) → U_final [W/m²K]
- *   calculateRoomLosses(project, room)                     → loss metrics object
+ *   calculateUWithInsulation(baseR, isolantMat, epaisseur) → effective U [W/m²K]
+ *   calculateRoomLosses(project, room)                    → loss metrics object
+ *
+ * Surface shape expected per element:
+ *   Opaque (wall / roof / floor):
+ *     rValue        {number}  – construction-layer R [m²K/W] (from preset or manual)
+ *     uValue        {number}  – legacy U [W/m²K] (fallback when rValue absent)
+ *     isolantMat    {string}  – key into ISOLANT_OPTS (or "aucun" / undefined)
+ *     isolantEpaisseur {number} – insulation thickness [m]
+ *     contact       {string}  – "EXT" | "LNC" | "SOL"
+ *     group         {string}  – "vertical" | "roof" | "floor"
+ *     psi           {number}  – linear TB coefficient [W/mK]  (optional)
+ *     bridgeLength  {number}  – TB linear length [m]           (optional)
+ *     lncTemp       {number}  – LNC space temperature [°C]     (optional)
+ *
+ *   Window / Door (glazing & portal):
+ *     uValue        {number}  – U or K [W/m²K]  (direct — no Rs adjustment)
+ *     psi / bridgeLength as above
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * DTR C3.2 Surface Resistances  (Table 2, §3.2)
+ *   Vertical elements (walls, windows, doors):   Rs_int = 0.13,  Rs_ext = 0.04
+ *   Horizontal — upward heat flow (roofs):        Rs_int = 0.10,  Rs_ext = 0.04
+ *   Horizontal — downward heat flow (floors):     Rs_int = 0.17,  Rs_ext = 0.04
+ *   LNC contact (both sides interior-like):       Rs_int = 0.13,  Rs_lnc = 0.13
  */
 
-import { ISOLANT_OPTS } from "../data/dtrMaterials.js";
-import { CLIMATE_ZONES, WILAYAS } from "../data/algeria_climate.js";
+import { ISOLANT_OPTS } from "./dtrMaterials.js";
+import { WILAYAS, CLIMATE_ZONES } from "./algeria_climate.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** DTR C3.2 §4.1 — Surface resistances [m²K/W] */
+// ─── DTR C3.2 Surface Resistances (m²K/W) ────────────────────────────────────
 const RS = {
-  lateral_ext:    0.17,
-  ascendant_ext:  0.14,
-  descendant_ext: 0.22,
-  lateral_lnc:    0.22,
-  ascendant_lnc:  0.18,
-  descendant_lnc: 0.34,
+  wall:  { int: 0.13, ext: 0.04 },
+  roof:  { int: 0.10, ext: 0.04 },
+  floor: { int: 0.17, ext: 0.04 },
+  lnc:   { int: 0.13, lnc: 0.13 }, // both sides treated as interior-adjacent
 };
 
-/** DTR C3.2 Table 2.1 — Reference U-values [a,b,c,d,e] by building type and zone */
-const DREF_T = {
-  individuel: {
-    A:  [1.10, 2.40, 1.40, 3.50, 4.50],
-    B:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    Bp: [1.10, 2.40, 1.20, 3.50, 4.50],
-    C:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    D:  [2.40, 3.40, 1.40, 3.50, 4.50],
-    Dp: [2.40, 3.40, 1.40, 3.50, 4.50],
-    E:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    E1: [1.10, 2.40, 1.20, 3.50, 4.50],
-  },
-  collectif: {
-    A:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    B:  [0.90, 2.40, 1.20, 3.50, 4.50],
-    Bp: [0.90, 2.40, 1.20, 3.50, 4.50],
-    C:  [0.85, 2.40, 1.20, 3.50, 4.50],
-    D:  [2.40, 3.40, 1.40, 3.50, 4.50],
-    Dp: [2.40, 3.40, 1.40, 3.50, 4.50],
-    E:  [0.85, 2.40, 1.20, 3.50, 4.50],
-    E1: [0.85, 2.40, 1.20, 3.50, 4.50],
-  },
+// ─── DTR C3.2 §3 — Base outdoor design temperatures by zone ─────────────────
+const ZONE_BASE_TEMP = { A: 4, B: 2, C: -2, D: 5, E: 6, E1: 6 };
+
+// ─── DTR C3.2 §7 — Discontinuous heating correction (DB) ────────────────────
+// mode_chauf:  "continu" | "semi_continu" | "intermittent"
+// inertie:     "forte" | "moyenne" | "faible"
+const DB_TABLE = {
+  continu:       { forte: 0,  moyenne: 0,  faible: 0  },
+  semi_continu:  { forte: 4,  moyenne: 6,  faible: 8  },
+  intermittent:  { forte: 7,  moyenne: 10, faible: 14 },
 };
 
-/** DTR C3.2 Table 5.2 — Ground floor U [W/m²K] by depth z (no insulation) */
-const KS52 = [
-  [-9999, -6,    0   ],
-  [-6,    -4,    0.20],
-  [-4,    -2.5,  0.40],
-  [-2.5,  -1.8,  0.60],
-  [-1.8,  -1.2,  0.80],
-  [-1.2,  -0.7,  1.00],
-  [-0.7,  -0.4,  1.20],
-  [-0.4,  -0.2,  1.40],
-  [-0.2,   0.25, 1.75],
-  [ 0.25,  0.45, 2.10],
-  [ 0.45,  1.05, 2.35],
-  [ 1.05, 9999,  2.55],
-];
-
-/** DTR C3.2 Table 5.3 — Ground floor U with perimeter insulation */
-const KS53 = [
-  [-9999, -6,    [0,    0,    0,    0,    0,    0,    0   ]],
-  [-6,    -4,    [0.20, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15]],
-  [-4,    -2.5,  [0.40, 0.35, 0.35, 0.35, 0.35, 0.30, 0.30]],
-  [-2.5,  -1.8,  [0.55, 0.55, 0.50, 0.50, 0.45, 0.45, 0.40]],
-  [-1.8,  -1.2,  [0.70, 0.70, 0.65, 0.60, 0.60, 0.55, 0.45]],
-  [-1.2,  -0.7,  [0.90, 0.85, 0.80, 0.75, 0.70, 0.65, 0.55]],
-  [-0.7,  -0.4,  [1.05, 1.00, 0.95, 0.90, 0.80, 0.75, 0.65]],
-  [-0.4,  -0.2,  [1.20, 1.10, 1.05, 1.00, 0.90, 0.80, 0.70]],
-  [-0.2,   0.25, [1.45, 1.35, 1.25, 1.15, 1.05, 0.95, 0.85]],
-  [ 0.25,  0.45, [1.70, 1.55, 1.45, 1.30, 1.20, 1.05, 0.95]],
-  [ 0.45,  1.05, [1.90, 1.70, 1.55, 1.45, 1.30, 1.15, 1.00]],
-  [ 1.05, 9999,  [2.05, 1.85, 1.70, 1.55, 1.40, 1.25, 1.10]],
-];
-
-/** DTR C3.2 Table 5.8 — Buried wall U values */
-const KS58 = [
-  [-9999, -6,   [1.40, 1.65, 1.85, 2.05, 2.25, 2.45, 2.65, 2.80, 3.00, 3.20, 3.40]],
-  [-6,    -5,   [1.30, 1.50, 1.70, 1.90, 2.05, 2.25, 2.45, 2.65, 2.85, 3.00, 3.20]],
-  [-5,    -4,   [1.15, 1.35, 1.50, 1.65, 1.90, 2.05, 2.25, 2.45, 2.65, 2.80, 3.00]],
-  [-4,    -3,   [1.00, 1.15, 1.30, 1.45, 1.65, 1.85, 2.00, 2.20, 2.35, 2.55, 2.70]],
-  [-3,    -2.5, [0.85, 1.00, 1.15, 1.30, 1.45, 1.65, 1.80, 2.00, 2.15, 2.30, 2.50]],
-  [-2.5,  -2,   [0.70, 0.85, 1.00, 1.15, 1.30, 1.45, 1.65, 1.80, 1.95, 2.10, 2.30]],
-  [-2,    -1.5, [0.60, 0.70, 0.85, 1.00, 1.10, 1.25, 1.40, 1.55, 1.75, 1.90, 2.05]],
-  [-1.5,  -1,   [0.45, 0.55, 0.65, 0.75, 0.90, 1.00, 1.15, 1.30, 1.45, 1.60, 1.75]],
-  [-1,    -0.7, [0.35, 0.40, 0.50, 0.60, 0.65, 0.80, 0.90, 1.05, 1.15, 1.30, 1.40]],
-  [-0.7,  -0.4, [0.20, 0.30, 0.35, 0.40, 0.50, 0.55, 0.65, 0.75, 0.85, 0.95, 1.10]],
-  [-0.4,  -0.2, [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.55, 0.60, 0.70]],
-];
-
-// DTR §3.2 — fallback base temperatures by zone
-const ZONE_BASE_TEMP = { A: 4, B: 2, Bp: 2, C: -2, D: 5, Dp: 5, E: 6, E1: 6 };
+// ─── DTR C3.2 §6 — Reference transmission coefficient [W/K·m²] by zone ──────
+// Dref limits per heated zone (W/K per m² of floor area):
+const DREF_BY_ZONE = { A: 1.1, B: 1.0, C: 0.8, D: 1.1, E: 1.2, E1: 1.3 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INTERNAL HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-const f4 = (v) => +Number(v).toFixed(4);
-const n  = (v) => parseFloat(v) || 0;
-
-/** Interpolate KS52 table for no-insulation ground floor */
-function gKS52(z) {
-  for (const [lo, hi, ks] of KS52) if (z >= lo && z < hi) return ks;
-  return 0;
-}
-
-/** Column index for R-value in KS53 table */
-function rCol53(r) {
-  return r < 0.40 ? 0 : r < 0.60 ? 1 : r < 0.80 ? 2 : r < 1.05 ? 3 : r < 1.55 ? 4 : r < 2.05 ? 5 : 6;
-}
-
-/** Interpolate KS53 table for insulated ground floor */
-function gKS53(z, r) {
-  for (const [lo, hi, ks] of KS53) if (z >= lo && z < hi) return ks[rCol53(r)];
-  return 0;
-}
-
-const gCorr54 = (z) => z <= -0.45 ? 0 : z < -0.20 ? 0.10 : 0.20;
-const gCorr55 = (z) => z <= -0.45 ? 0 : z < -0.20 ? 0.05 : 0.10;
-const gCorr56 = (z, r) => {
-  const c = z <= -0.45 ? [0, 0, 0, 0] : z < -0.20 ? [0.05, 0.05, 0.10, 0.10] : [0.15, 0.15, 0.20, 0.25];
-  const ci = r < 0.40 ? 0 : r < 0.60 ? 1 : r < 1.05 ? 2 : 3;
-  return c[ci];
-};
-
-/** Full ground-floor U-value selector with insulation type */
-function gKSol(z, type, r) {
-  if (!type || type === "sans_iso") return gKS52(z);
-  const base = gKS53(z, r);
-  if (type === "iso_perimetre")  return base;
-  if (type === "iso_surface")    return Math.max(0, f4(base - gCorr54(z)));
-  if (type === "iso_peri_mur")   return Math.max(0, f4(base - gCorr55(z)));
-  if (type === "iso_surface_mur")return Math.max(0, f4(base - gCorr56(z, r)));
-  return gKS52(z);
-}
-
-/** Column index for KS58 table (buried walls) */
-function kCol58(K) {
-  return K < 0.50 ? 0 : K < 0.65 ? 1 : K < 0.80 ? 2 : K < 1.00 ? 3 : K < 1.20 ? 4 :
-         K < 1.50 ? 5 : K < 1.80 ? 6 : K < 2.20 ? 7 : K < 2.60 ? 8 : K < 3.10 ? 9 : 10;
-}
-
-/** Interpolate KS58 for buried walls */
-function gKS58(z, K) {
-  if (z >= -0.20) return K;
-  for (const [lo, hi, ks] of KS58) if (z >= lo && z < hi) return ks[kCol58(K)];
-  return 0;
-}
-
-/** Compute effective area from surface object (width×height fallback to area) */
-function calcArea(surf) {
-  const w = Number(surf.width);
-  const h = Number(surf.height);
-  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return w * h;
-  const a = Number(surf.area);
-  return Number.isFinite(a) && a > 0 ? a : 0;
-}
-
-/** τ coefficient for LNC elements */
-function getTau(surf) {
-  const manual = parseFloat(surf?.tau);
-  if (Number.isFinite(manual) && manual > 0) return manual;
-  return 0.65; // DTR default
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PUBLIC API
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Calcule le nouveau coefficient U si un isolant est appliqué à la paroi.
- * Formule: R_total = R_paroi + R_isolant = (1 / U_initial) + (Epaisseur / Lambda)
- * U_final = 1 / R_total
+ * Resolve effective U [W/m²K] for an opaque element given its R-value,
+ * surface resistances (determined by group + contact), and optional insulation.
+ *
+ *   R_total = Rs_int + R_construction + R_insulation + Rs_ext
+ *   U_eff   = 1 / R_total
+ *
+ * @param {number}  rConstruction  – construction-layer R from preset [m²K/W]
+ * @param {string}  group          – "vertical" | "roof" | "floor"
+ * @param {string}  contact        – "EXT" | "LNC"
+ * @param {string}  [isolantMat]   – key in ISOLANT_OPTS
+ * @param {number}  [epaisseur]    – insulation thickness [m]
+ * @returns {number} U effective [W/m²K]
  */
-export const calculateUWithInsulation = (baseU, isolantMat, epaisseur) => {
-  if (!isolantMat || isolantMat === "aucun" || !baseU) return baseU;
+function resolveU(rConstruction, group, contact, isolantMat, epaisseur) {
+  const isLNC = String(contact ?? "EXT").toUpperCase() === "LNC";
 
-  const isolant = ISOLANT_OPTS.find((opt) => opt.val === isolantMat);
-  if (!isolant || !isolant.lambda) return baseU;
+  // Surface resistances
+  let rs_int, rs_ext;
+  if (isLNC) {
+    rs_int = RS.lnc.int;
+    rs_ext = RS.lnc.lnc;
+  } else if (group === "roof") {
+    rs_int = RS.roof.int;
+    rs_ext = RS.roof.ext;
+  } else if (group === "floor") {
+    rs_int = RS.floor.int;
+    rs_ext = RS.floor.ext;
+  } else {
+    rs_int = RS.wall.int;
+    rs_ext = RS.wall.ext;
+  }
 
-  const rParoi   = 1 / baseU;
-  const rIsolant = epaisseur / isolant.lambda;
-  const rTotal   = rParoi + rIsolant;
+  // Insulation resistance
+  let r_iso = 0;
+  if (isolantMat && isolantMat !== "aucun" && Number(epaisseur) > 0) {
+    const opt = ISOLANT_OPTS.find((o) => o.val === isolantMat);
+    if (opt && opt.lambda > 0) {
+      r_iso = Number(epaisseur) / opt.lambda;
+    }
+  }
 
-  return 1 / rTotal;
-};
+  const r_total = rs_int + Number(rConstruction) + r_iso + rs_ext;
+  return r_total > 0 ? 1 / r_total : 0;
+}
+
+/**
+ * Public helper: given a base R value + optional insulation, return U_eff.
+ * Keeps the old API signature for backward compatibility with any callers.
+ */
+export function calculateUWithInsulation(baseR, isolantMat, epaisseur) {
+  return resolveU(baseR, "vertical", "EXT", isolantMat, epaisseur);
+}
+
+/** Effective area from a surface object (width×height preferred, then area field). */
+function surfaceArea(s) {
+  const w = Number(s.width  ?? 0);
+  const h = Number(s.height ?? 0);
+  if (w > 0 && h > 0) return w * h;
+  const a = Number(s.area ?? 0);
+  return a > 0 ? a : 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main engine
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * calculateRoomLosses(project, room)
  *
- * Calculates per-room heat transmission and ventilation losses per DTR C3-2.
- *
- * @param {object} project  – project data (info, locals…)
- * @param {object} room     – room object with surfaces[], volume, infiltration
- * @returns {{
- *   Qt: number,       transmission loss coefficient (W/K)
- *   Qt_ponts: number, thermal bridge contribution (W/K)
- *   Qv: number,       ventilation loss (W/K)
- *   Cin: number,      ventilation correction factor
- *   Q_total: number,  design heat load (W)
- *   DT: number,       total transmission coeff DT (W/K)
- *   DR: number,       ventilation coeff DR (W/K)
- *   Dref: number,     reference coeff Dref (W/K)
- *   reg_ok: boolean,  DTR conformity
- *   DB: number        base design load (W)
- * }}
+ * Returns:
+ *   Qt        – transmission losses [W]
+ *   Qt_ponts  – thermal-bridge losses [W]
+ *   Qv        – ventilation losses [W]
+ *   Cin       – indoor-air heat capacity coefficient [W/K]
+ *   Q_total   – design heat load [W]
+ *   DT        – transmission coefficient [W/K]
+ *   DR        – ventilation coefficient [W/K]
+ *   Dref      – reference transmission coefficient [W/K] (DTR §6)
+ *   reg_ok    – boolean | null — whether DT ≤ 1.05 × Dref
+ *   DB        – discontinuous-heating surplus [W]
  */
 export function calculateRoomLosses(project, room) {
-  // ── Resolve climate parameters ───────────────────────────────────────────
-  const wilayaId   = project?.info?.wilayaId ?? 16;
-  const wilaya     = WILAYAS?.find((w) => w.id === wilayaId) ?? WILAYAS?.[0];
-  const zoneKey    = project?.info?.climateZone ?? wilaya?.defaultZone ?? "A";
-  const zone       = CLIMATE_ZONES?.[zoneKey] ?? CLIMATE_ZONES?.A;
-  const T_outdoor  = zone?.baseTemp ?? ZONE_BASE_TEMP[zoneKey] ?? 0;
-  const T_indoor   = Number(project?.info?.indoorSetpoint  ?? 20);
-  const T_ground   = Number(project?.info?.groundTemp      ?? 10);
-  const buildType  = project?.info?.buildingType ?? "collectif";
-  const dT         = T_indoor - T_outdoor;          // ΔT [K]
-  const dT_ground  = T_indoor - T_ground;           // ΔT vs ground
+  // ── 1. Climate / temperature data ─────────────────────────────────────────
+  const wilayaId  = project.info?.wilayaId ?? 16;
+  const wilaya    = WILAYAS.find((w) => w.id === wilayaId) ?? WILAYAS[0];
+  const zoneKey   = project.info?.climateZone ?? wilaya?.defaultZone ?? "A";
+  const T_outdoor = ZONE_BASE_TEMP[zoneKey] ?? 0;
+  const T_indoor  = Number(project.info?.indoorSetpoint ?? 20);
+  const T_ground  = Number(project.info?.groundTemp ?? 10);
+  const DeltaT    = T_indoor - T_outdoor;        // main design ΔT [K]
 
-  const surfaces = room?.surfaces ?? [];
+  // ── 2. Surface loop — transmission losses ─────────────────────────────────
+  let DT_sum       = 0;   // transmission coeff [W/K]
+  let Qt_ponts_sum = 0;   // thermal bridge losses [W]
 
-  let Qt = 0;       // transmission coeff sum  [W/K]
-  let Qt_ponts = 0; // thermal bridges         [W/K]
-  let S1 = 0, S2 = 0, S3 = 0, S4 = 0, S5 = 0; // Dref area accumulators
+  const surfaces = room.surfaces ?? [];
 
-  for (const surface of surfaces) {
-    const group   = surface.group ?? "vertical";
-    const contact = String(surface.contact ?? "EXT").toUpperCase();
-    const area    = calcArea(surface);
+  for (const s of surfaces) {
+    const group   = s.group   ?? "vertical";
+    const contact = String(s.contact ?? "EXT").toUpperCase();
+    const area    = surfaceArea(s);
 
-    // ── Apply insulation to get effective U ────────────────────────
-    let baseU = parseFloat(surface.uValue) || 0;
-    // Appliquer l'isolant si défini
-    const u = calculateUWithInsulation(baseU, surface.isolantMat, surface.isolantEpaisseur);
+    if (area <= 0) continue;
 
-    // Skip surfaces with no useful data
-    if (!area || !u) {
-      // Still accumulate Dref areas for valid areas even with u=0
-      // (only if it's a meaningful surface type for conformity check)
-    }
+    // ── Determine effective U for this element ──────────────────────────────
+    let U_eff = 0;
 
-    // ── Contact type handling ──────────────────────────────────────
-    const isLNC  = contact === "LNC";
-    const isSOL  = contact === "SOL";
-    const tau    = isLNC ? getTau(surface) : 1.0;
+    const typeName = String(s.elementType ?? "");
+    const isOpaque =
+      !typeName.includes("Fenêtre") &&
+      !typeName.includes("Baie")    &&
+      !typeName.startsWith("Porte");
 
-    // ── Element type classification ────────────────────────────────
-    const typeName = surface.elementType ?? "";
-    const isWindow = typeName.includes("Fenêtre") || typeName.includes("Baie");
-    const isDoor   = typeName.startsWith("Porte") && !typeName.includes("Fenêtre");
-
-    // ── Thermal bridge ─────────────────────────────────────────────
-    const psi          = parseFloat(surface.psi)          || 0;
-    const bridgeLength = parseFloat(surface.bridgeLength) || 0;
-    if (psi && bridgeLength) {
-      Qt_ponts += tau * psi * bridgeLength;
-    }
-
-    // ── Surface transmission ───────────────────────────────────────
-    if (area > 0 && u > 0) {
-      if (isSOL) {
-        // Ground floor: use z-based U factor from DTR tables
-        const z       = parseFloat(surface.z)       || 0;
-        const type_iso= surface.type_iso            || "sans_iso";
-        const r_iso   = parseFloat(surface.r_iso)   || 1.0;
-        const perimetre = parseFloat(surface.perimetre) || 0;
-        const ks = gKSol(z, type_iso, r_iso);
-        if (perimetre > 0) {
-          Qt += ks * perimetre;
-          S2 += area;
-        }
-      } else {
-        Qt += tau * u * area;
-
-        // ── Dref area classification ───────────────────────────────
-        if (group === "roof" || typeName.includes("Toiture") || typeName.includes("Plafond")) {
-          S1 += area;
-        } else if (group === "floor" || typeName.includes("Plancher")) {
-          S2 += area;
-        } else if (isWindow || typeName.includes("Baie")) {
-          S5 += area;
-        } else if (isDoor) {
-          S4 += area;
+    if (contact !== "SOL" && isOpaque) {
+      if (typeof s.rValue === "number" && s.rValue > 0) {
+        // R-based path (new presets)
+        U_eff = resolveU(s.rValue, group, contact, s.isolantMat, s.isolantEpaisseur);
+      } else if (typeof s.uValue === "number" && s.uValue > 0) {
+        // Legacy U path (old surfaces or imports from CAD without rValue)
+        // Apply insulation on top if present
+        if (s.isolantMat && s.isolantMat !== "aucun" && Number(s.isolantEpaisseur) > 0) {
+          const opt = ISOLANT_OPTS.find((o) => o.val === s.isolantMat);
+          if (opt && opt.lambda > 0) {
+            const r_iso  = Number(s.isolantEpaisseur) / opt.lambda;
+            const r_base = 1 / s.uValue;
+            U_eff = 1 / (r_base + r_iso);
+          } else {
+            U_eff = s.uValue;
+          }
         } else {
-          // Wall (mur)
-          S3 += area;
+          U_eff = s.uValue;
         }
       }
+    } else if (!isOpaque) {
+      // Windows & doors use U/K directly (no surface resistance adjustment)
+      U_eff = typeof s.uValue === "number" && s.uValue > 0 ? s.uValue : 0;
+    } else if (contact === "SOL") {
+      // Ground-floor (Sur Terre-Plein etc.): use rValue or uValue directly
+      if (typeof s.rValue === "number" && s.rValue > 0) {
+        U_eff = resolveU(s.rValue, "floor", "EXT", s.isolantMat, s.isolantEpaisseur);
+      } else if (typeof s.uValue === "number" && s.uValue > 0) {
+        U_eff = s.uValue;
+      }
+    }
+
+    // ── Temperature difference for this element ─────────────────────────────
+    let delta_T_elem = DeltaT;
+
+    if (contact === "LNC") {
+      // DTR §4.2 — LNC reduction: use user-supplied LNC temp if available,
+      // otherwise fall back to a 0.7× reduction factor.
+      if (typeof s.lncTemp === "number") {
+        delta_T_elem = T_indoor - s.lncTemp;
+      } else {
+        delta_T_elem = DeltaT * 0.7;
+      }
+    } else if (contact === "SOL") {
+      delta_T_elem = T_indoor - T_ground;
+    }
+
+    // ── Transmission loss coefficient for this surface [W/K] ────────────────
+    // Normalised to main DeltaT so DT_sum × DeltaT gives correct Qt
+    if (DeltaT > 0) {
+      DT_sum += U_eff * area * (delta_T_elem / DeltaT);
+    }
+
+    // ── Thermal bridges (linear) ─────────────────────────────────────────────
+    const psi     = Number(s.psi ?? 0);
+    const bridgeL = Number(s.bridgeLength ?? 0);
+    if (psi > 0 && bridgeL > 0) {
+      Qt_ponts_sum += psi * bridgeL * delta_T_elem;
     }
   }
 
-  // ── Thermal bridges total ────────────────────────────────────────────────
-  Qt += Qt_ponts;
+  const Qt       = DT_sum * DeltaT;
+  const Qt_ponts = Qt_ponts_sum;
 
-  // ── Ventilation losses ───────────────────────────────────────────────────
-  const volume      = Number(room?.volume       ?? 0);
-  const infiltration= Number(room?.infiltration ?? 0.5); // ACH
-  const rho_cp      = 0.34; // W·h/(m³·K)  ≡  0.34 Wh/m³K
-  const Qv = rho_cp * infiltration * volume; // [W/K]
+  // ── 3. Ventilation losses (DTR §5.4) ──────────────────────────────────────
+  // Cin = ρ·c·n·V  [W/K]   (ρ·c_air ≈ 0.34 Wh/m³K)
+  const volume  = Number(room.volume ?? 0);
+  const n_ACH   = Number(room.infiltration ?? 0.5); // air changes per hour
+  const Cin     = 0.34 * n_ACH * volume;            // [W/K]
+  const Qv      = Cin * DeltaT;
 
-  // ── Correction factor Cin ────────────────────────────────────────────────
-  const Cin = 1.2; // DTR default (continuous operation, moderate inertia)
+  // ── 4. Discontinuous-heating correction (DTR §7) ──────────────────────────
+  const mode_chauf = project.info?.mode_chauf  ?? "continu";
+  const inertie    = project.info?.inertie     ?? "forte";
+  const db_row     = DB_TABLE[mode_chauf] ?? DB_TABLE.continu;
+  const DB_K       = db_row[inertie] ?? 0;          // temperature boost [K]
+  const DB         = (DT_sum + Cin) * DB_K;         // extra watts [W]
 
-  // ── Dref conformity check ────────────────────────────────────────────────
-  const drefCoefs = (DREF_T[buildType] ?? DREF_T.collectif)[zoneKey] ?? [1.10, 2.40, 1.20, 3.50, 4.50];
-  const Dref = f4(drefCoefs[0] * S1 + drefCoefs[1] * S2 + drefCoefs[2] * S3 + drefCoefs[3] * S4 + drefCoefs[4] * S5);
-  const DT   = f4(Qt);
-  const DR   = f4(Qv);
+  // ── 5. Total design heat load ──────────────────────────────────────────────
+  const Q_total = Qt + Qt_ponts + Qv + DB;
+
+  // ── 6. Reference coefficient Dref (DTR §6) ────────────────────────────────
+  // Dref = Dref_zone × A_floor  [W/K]
+  let A_floor = (room.surfaces ?? [])
+    .filter((s) => s.group === "floor")
+    .reduce((sum, s) => sum + surfaceArea(s), 0);
+  if (A_floor <= 0 && volume > 0) A_floor = volume / 2.5; // estimate @ 2.5m ceiling
+
+  const dref_coeff = DREF_BY_ZONE[zoneKey] ?? 1.0;
+  const Dref       = dref_coeff * A_floor;
+
+  // ── 7. Regulatory check ───────────────────────────────────────────────────
+  const DT     = DT_sum;
+  const DR     = Cin;
   const reg_ok = Dref > 0 ? DT <= 1.05 * Dref : null;
 
-  // ── Design heat load ─────────────────────────────────────────────────────
-  const Q_total = dT > 0 ? (DT + DR) * dT * Cin : 0;
-  const DB      = (DT + DR) * dT;
-
   return {
-    Qt:       f4(Qt),
-    Qt_ponts: f4(Qt_ponts),
-    Qv:       f4(Qv),
+    Qt:       Math.max(0, Qt),
+    Qt_ponts: Math.max(0, Qt_ponts),
+    Qv:       Math.max(0, Qv),
     Cin,
-    Q_total:  f4(Q_total),
-    DT,
-    DR,
+    Q_total:  Math.max(0, Q_total),
+    DT:       Math.max(0, DT),
+    DR:       Math.max(0, DR),
     Dref,
     reg_ok,
-    DB: f4(DB),
+    DB:       Math.max(0, DB),
   };
 }

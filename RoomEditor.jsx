@@ -5,9 +5,9 @@ import Section from "./Section.jsx";
 import { calculateRoomLosses } from "../../utils/dtrMath";
 import { CLIMATE_ZONES, WILAYAS } from "../../data/algeria_climate.js";
 import {
-  PRESETS_MURS,
-  PRESETS_TOITURES,
-  PRESETS_PLANCHERS,
+  WALL_R_PRESETS,
+  ROOF_R_PRESETS,
+  FLOOR_R_PRESETS,
   VITRAGE_OPTS,
   LAME_OPTS,
   CADRE_OPTS,
@@ -55,17 +55,18 @@ const PSI_PRESETS = [
 // ── DTR C3.2 base temperatures by zone (fallback — until CLIMATE_ZONES carries them) ──
 const ZONE_BASE_TEMP = { A: 4, B: 2, C: -2, D: 5, E: 6, E1: 6 };
 
-// ── Default material vals matching the new dtrMaterials.js keys ──────────────
-const DEFAULT_WALL_PRESET  = "db_brique_10_air_10"; // U = 1.28
-const DEFAULT_WALL_U       = 1.28;
-const DEFAULT_ROOF_PRESET_TERRASSE = "terrasse_isol_8cm"; // U = 0.48
-const DEFAULT_ROOF_U_TERRASSE      = 0.48;
-const DEFAULT_ROOF_PRESET_TUILES   = "tuiles_avec_solivage"; // U = 4.06
-const DEFAULT_ROOF_U_TUILES        = 4.06;
-const DEFAULT_ROOF_PRESET_DALLE    = "dalle_beton_20cm"; // U = 3.57
-const DEFAULT_ROOF_U_DALLE         = 3.57;
-const DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm"; // U = 2.70
-const DEFAULT_FLOOR_U      = 2.70;
+// ── Default material vals matching the new WALL_R_PRESETS / ROOF_R_PRESETS / FLOOR_R_PRESETS ──
+// Indices into each array (item 0 is "Manuel")
+const DEFAULT_WALL_PRESET_IDX        = 14;  // "Double paroi brique 10+10 (lame d'air 4cm)" R=0.48
+const DEFAULT_WALL_R                 = 0.48;
+const DEFAULT_ROOF_PRESET_IDX_TERRASSE = 13; // "Toiture terrasse non isolée"  R=0.15  (fallback)
+const DEFAULT_ROOF_R_TERRASSE          = 0.15;
+const DEFAULT_ROOF_PRESET_IDX_TUILES   = 16; // "Comble non isolé"              R=0.10  (fallback)
+const DEFAULT_ROOF_R_TUILES            = 0.10;
+const DEFAULT_ROOF_PRESET_IDX_DALLE    = 1;  // "Dalle béton 15cm"              R=0.06
+const DEFAULT_ROOF_R_DALLE             = 0.06;
+const DEFAULT_FLOOR_PRESET_IDX       = 4;   // "Dalle + polystyrène 4cm + chape" R=1.08
+const DEFAULT_FLOOR_R                = 1.08;
 
 const DEFAULT_WIN_TYPE  = "double";
 const DEFAULT_WIN_LAME  = "10_11";
@@ -114,20 +115,20 @@ function buildUpdatesForElementType(prev, newElementType, group) {
       return updates;
     }
 
-    // Opaque wall
-    return { ...updates, composition: DEFAULT_WALL_PRESET, uValue: DEFAULT_WALL_U };
+    // Opaque wall — store R-based preset
+    return { ...updates, composition: DEFAULT_WALL_PRESET_IDX, rValue: DEFAULT_WALL_R };
   }
 
   if (group === "roof") {
     if (newElementType.includes("Tuiles"))
-      return { ...updates, composition: DEFAULT_ROOF_PRESET_TUILES,   uValue: DEFAULT_ROOF_U_TUILES };
+      return { ...updates, composition: DEFAULT_ROOF_PRESET_IDX_TUILES,   rValue: DEFAULT_ROOF_R_TUILES };
     if (newElementType.includes("Terrasse"))
-      return { ...updates, composition: DEFAULT_ROOF_PRESET_TERRASSE, uValue: DEFAULT_ROOF_U_TERRASSE };
-    return { ...updates, composition: DEFAULT_ROOF_PRESET_DALLE, uValue: DEFAULT_ROOF_U_DALLE };
+      return { ...updates, composition: DEFAULT_ROOF_PRESET_IDX_TERRASSE, rValue: DEFAULT_ROOF_R_TERRASSE };
+    return { ...updates, composition: DEFAULT_ROOF_PRESET_IDX_DALLE, rValue: DEFAULT_ROOF_R_DALLE };
   }
 
   if (group === "floor" && contact !== "SOL") {
-    return { ...updates, composition: DEFAULT_FLOOR_PRESET, uValue: DEFAULT_FLOOR_U };
+    return { ...updates, composition: DEFAULT_FLOOR_PRESET_IDX, rValue: DEFAULT_FLOOR_R };
   }
 
   return updates;
@@ -179,9 +180,15 @@ export default function RoomEditor({
 
   // ── Preset handlers (defined once, outside the .map()) ─────────────────────
   const handlePresetChange = (id, value, presets) => {
-    const preset = presets.find((p) => p.val === value);
-    const updates = { composition: value };
-    if (preset && preset.u !== "") updates.uValue = preset.u;
+    // value is either "manuel" or a stringified array index
+    if (value === "manuel") {
+      onUpdateSurface(id, { composition: "manuel" });
+      return;
+    }
+    const idx = parseInt(value, 10);
+    const preset = presets[idx];
+    const updates = { composition: idx };
+    if (preset && preset.R !== null) updates.rValue = preset.R;
     onUpdateSurface(id, updates);
   };
 
@@ -261,12 +268,13 @@ export default function RoomEditor({
             const isWall   = !isWindow && !isDoor;
 
             // Opaque-surface preset list + resolved select value
-            const opaquePresets = isRoof ? PRESETS_TOITURES : isFloor ? PRESETS_PLANCHERS : PRESETS_MURS;
+            // composition is stored as an integer index (or "manuel")
+            const opaquePresets = isRoof ? ROOF_R_PRESETS : isFloor ? FLOOR_R_PRESETS : WALL_R_PRESETS;
             const opaqueMatSelectValue =
               surf.composition === "manuel"
                 ? "manuel"
-                : opaquePresets.some((p) => p.val === surf.composition)
-                  ? surf.composition
+                : (typeof surf.composition === "number" && opaquePresets[surf.composition] != null)
+                  ? String(surf.composition)
                   : "manuel";
 
             // Auto-computed K values (null when "manuel" selected or invalid)
@@ -423,26 +431,26 @@ export default function RoomEditor({
                         onChange={(e) => handlePresetChange(surf.id, e.target.value, opaquePresets)}
                         className="glass-input w-full rounded-md px-2 py-1.5 text-sm font-semibold"
                       >
-                        {opaquePresets.map((p) => (
-                          <option key={p.val} value={p.val} style={{ background: "var(--app-bg-color)" }}>
-                            {p.label}
+                        {opaquePresets.map((p, i) => (
+                          <option key={i} value={p.R === null ? "manuel" : String(i)} style={{ background: "var(--app-bg-color)" }}>
+                            {p.label_fr}
                           </option>
                         ))}
                       </select>
-                      {/* Auto U badge */}
-                      {opaqueMatSelectValue !== "manuel" && Number(surf.uValue) > 0 && (
+                      {/* Base R badge — replaces the old U badge */}
+                      {opaqueMatSelectValue !== "manuel" && Number(surf.rValue) > 0 && (
                         <p className="text-[11px] font-mono opacity-90" style={{ color: "var(--glass-primary)" }}>
-                          U = {Number(surf.uValue).toFixed(2)} W/m²K
+                          R = {Number(surf.rValue).toFixed(2)} m²K/W
                         </p>
                       )}
-                      {/* Manual U input */}
+                      {/* Manual R input */}
                       {opaqueMatSelectValue === "manuel" && (
                         <div>
-                          <label className="text-xs font-medium opacity-80">Coefficient U (saisie manuelle)</label>
+                          <label className="text-xs font-medium opacity-80">Résistance R (saisie manuelle, m²K/W)</label>
                           <input
                             type="number" step="0.01"
-                            value={surf.uValue ?? ""}
-                            onChange={(e) => onUpdateSurface(surf.id, { uValue: Number(e.target.value) })}
+                            value={surf.rValue ?? ""}
+                            onChange={(e) => onUpdateSurface(surf.id, { rValue: Number(e.target.value) })}
                             className="glass-input mt-1 w-full rounded-md px-2 py-1.5 text-sm"
                           />
                         </div>

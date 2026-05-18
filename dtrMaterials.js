@@ -1,59 +1,102 @@
 /**
- * DTR C3.2 - Building Materials U-Values
- * Source: DTR Annex B & C — U-Values in W/m²K
+ * DTR C3.2 - Building Materials Thermal Resistance (R) & U-Values
+ * Source: DTR C3.2 Annex B & C
  *
  * Exports:
- *   PRESETS_MURS       – wall presets
- *   PRESETS_TOITURES   – roof presets
- *   PRESETS_PLANCHERS  – floor presets
+ *   WALL_R_PRESETS     – wall presets  (R in m²K/W, without surface resistances)
+ *   ROOF_R_PRESETS     – roof presets  (R in m²K/W, without surface resistances)
+ *   FLOOR_R_PRESETS    – floor presets (R in m²K/W, without surface resistances)
  *   VITRAGE_OPTS       – glazing type options
  *   LAME_OPTS          – air-gap thickness options (for double glazing)
  *   CADRE_OPTS         – frame material options
  *   MATERIAU_OPTS      – door material options
  *   PROP_VITRAGE_OPTS  – glazed proportion options (for doors)
  *
- *   gKV(type, lame, cadre)         – returns U-value [W/m²K] for a window
- *   gKP(materiau, vitrage, contact) – returns U-value [W/m²K] for a door
+ *   gKV(type, lame, cadre)          – returns U-value [W/m²K] for a window
+ *   gKP(materiau, contact)          – returns U-value [W/m²K] for a door
+ *
+ * Shape: { label_fr, label_ar, R }
+ *   R = null  →  "Manuel" (user enters rValue manually)
+ *   R = number → thermal resistance of the construction layer only
+ *                (surface resistances Rs_int/Rs_ext are added by the math engine)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WALLS  (Murs)
+// WALLS  (Murs) — R without surface resistances
 // ─────────────────────────────────────────────────────────────────────────────
-export const PRESETS_MURS = [
-  { val: "db_brique_10_air_10",    label: "Double paroi brique (10+air+10)",       u: 1.28 },
-  { val: "db_brique_isolant_5cm",  label: "Double brique + Isolant 5cm",           u: 0.66 },
-  { val: "brique_creuse_10cm",     label: "Mur simple brique creuse (10cm)",       u: 2.38 },
-  { val: "terre_11cm",             label: "Mur briquettes de terre (11cm)",        u: 3.25 },
-  { val: "terre_22cm",             label: "Mur briquettes de terre (22cm)",        u: 2.20 },
-  { val: "parpaings_15cm",         label: "Mur parpaings creux (15cm)",            u: 2.65 },
-  { val: "parpaings_20cm",         label: "Mur parpaings creux (20cm)",            u: 2.43 },
-  { val: "beton_arme_15cm",        label: "Voile en Béton Armé (15cm)",            u: 1.41 },
-  { val: "beton_arme_20cm",        label: "Voile en Béton Armé (20cm)",            u: 1.18 },
-  { val: "manuel",                 label: "Personnalisé (Saisie Manuelle U)",      u: ""   },
+export const WALL_R_PRESETS = [
+  { label_fr: "Manuel",                       label_ar: "يدوي",                              R: null },
+  { label_fr: "Brique creuse 10cm",           label_ar: "طوب أجوف 10سم",                     R: 0.20 },
+  { label_fr: "Brique creuse 15cm",           label_ar: "طوب أجوف 15سم",                     R: 0.29 },
+  { label_fr: "Brique creuse 20cm",           label_ar: "طوب أجوف 20سم",                     R: 0.37 },
+  { label_fr: "Brique creuse 25cm",           label_ar: "طوب أجوف 25سم",                     R: 0.46 },
+  { label_fr: "Brique creuse 30cm",           label_ar: "طوب أجوف 30سم",                     R: 0.55 },
+  { label_fr: "Brique pleine 10cm",           label_ar: "طوب مصمت 10سم",                     R: 0.13 },
+  { label_fr: "Brique pleine 20cm",           label_ar: "طوب مصمت 20سم",                     R: 0.26 },
+  { label_fr: "Parpaing creux 10cm",          label_ar: "بلوك أجوف 10سم",                    R: 0.16 },
+  { label_fr: "Parpaing creux 15cm",          label_ar: "بلوك أجوف 15سم",                    R: 0.22 },
+  { label_fr: "Parpaing creux 20cm",          label_ar: "بلوك أجوف 20سم",                    R: 0.27 },
+  { label_fr: "Parpaing creux 25cm",          label_ar: "بلوك أجوف 25سم",                    R: 0.32 },
+  { label_fr: "Parpaing plein 15cm",          label_ar: "بلوك مصمت 15سم",                    R: 0.10 },
+  { label_fr: "Parpaing plein 20cm",          label_ar: "بلوك مصمت 20سم",                    R: 0.13 },
+  { label_fr: "Double paroi brique 10+10 (lame d'air 4cm)", label_ar: "جدار مزدوج طوب 10+10 (فراغ 4سم)", R: 0.48 },
+  { label_fr: "Double paroi brique 10+10 + laine de roche 4cm", label_ar: "طوب 10+10 + صوف صخري 4سم",   R: 1.45 },
+  { label_fr: "Double paroi brique 10+15 (lame d'air 4cm)", label_ar: "جدار مزدوج طوب 10+15 (فراغ 4سم)", R: 0.57 },
+  { label_fr: "Double paroi brique 15+15 (lame d'air 4cm)", label_ar: "جدار مزدوج طوب 15+15 (فراغ 4سم)", R: 0.66 },
+  { label_fr: "Béton armé 15cm",              label_ar: "خرسانة مسلحة 15سم",                 R: 0.06 },
+  { label_fr: "Béton armé 20cm",              label_ar: "خرسانة مسلحة 20سم",                 R: 0.08 },
+  { label_fr: "Béton cellulaire 10cm",        label_ar: "خرسانة خلوية 10سم",                 R: 0.26 },
+  { label_fr: "Béton cellulaire 15cm",        label_ar: "خرسانة خلوية 15سم",                 R: 0.39 },
+  { label_fr: "Béton cellulaire 20cm",        label_ar: "خرسانة خلوية 20سم",                 R: 0.52 },
+  { label_fr: "Laine de roche 4cm",           label_ar: "صوف صخري 4سم",                      R: 1.00 },
+  { label_fr: "Laine de roche 6cm",           label_ar: "صوف صخري 6سم",                      R: 1.50 },
+  { label_fr: "Laine de roche 8cm",           label_ar: "صوف صخري 8سم",                      R: 2.00 },
+  { label_fr: "Polystyrène expansé 4cm",      label_ar: "بوليستيرين منتفخ 4سم",              R: 1.00 },
+  { label_fr: "Polystyrène expansé 6cm",      label_ar: "بوليستيرين منتفخ 6سم",              R: 1.50 },
+  { label_fr: "Polystyrène expansé 8cm",      label_ar: "بوليستيرين منتفخ 8سم",              R: 2.00 },
+  { label_fr: "Polystyrène extrudé 4cm",      label_ar: "بوليستيرين مبثوق 4سم",              R: 1.25 },
+  { label_fr: "Polystyrène extrudé 6cm",      label_ar: "بوليستيرين مبثوق 6سم",              R: 1.88 },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ROOFS  (Toitures)
+// ROOFS  (Toitures) — R without surface resistances
 // ─────────────────────────────────────────────────────────────────────────────
-export const PRESETS_TOITURES = [
-  { val: "terrasse_isol_5cm",      label: "Toiture Terrasse Isolée (5cm)",         u: 0.65 },
-  { val: "terrasse_isol_8cm",      label: "Toiture Terrasse Isolée (8cm)",         u: 0.48 },
-  { val: "dalle_beton_20cm",       label: "Dalle Pleine Béton (20cm) non isolée",  u: 3.57 },
-  { val: "tuiles_sans_solivage",   label: "Tuiles/Fibrociment sans solivage",      u: 5.80 },
-  { val: "tuiles_avec_solivage",   label: "Tuiles/Fibrociment avec solivage",      u: 4.06 },
-  { val: "tole_sans_solivage",     label: "Tôle galvanisée sans solivage",         u: 9.28 },
-  { val: "tole_avec_solivage",     label: "Tôle galvanisée avec solivage",         u: 4.64 },
-  { val: "manuel",                 label: "Personnalisé (Saisie Manuelle U)",      u: ""   },
+export const ROOF_R_PRESETS = [
+  { label_fr: "Manuel",                              label_ar: "يدوي",                         R: null },
+  { label_fr: "Dalle béton 15cm",                   label_ar: "بلاطة خرسانة 15سم",             R: 0.06 },
+  { label_fr: "Dalle béton 20cm",                   label_ar: "بلاطة خرسانة 20سم",             R: 0.08 },
+  { label_fr: "Dalle + enduit plâtre",               label_ar: "بلاطة + ليبج",                  R: 0.10 },
+  { label_fr: "Dalle + laine de roche 4cm",          label_ar: "بلاطة + صوف صخري 4سم",          R: 1.08 },
+  { label_fr: "Dalle + laine de roche 6cm",          label_ar: "بلاطة + صوف صخري 6سم",          R: 1.58 },
+  { label_fr: "Dalle + laine de roche 8cm",          label_ar: "بلاطة + صوف صخري 8سم",          R: 2.08 },
+  { label_fr: "Dalle + laine de roche 10cm",         label_ar: "بلاطة + صوف صخري 10سم",         R: 2.58 },
+  { label_fr: "Dalle + polystyrène 4cm",             label_ar: "بلاطة + بوليستيرين 4سم",         R: 1.08 },
+  { label_fr: "Dalle + polystyrène 6cm",             label_ar: "بلاطة + بوليستيرين 6سم",         R: 1.58 },
+  { label_fr: "Dalle + polystyrène 8cm",             label_ar: "بلاطة + بوليستيرين 8سم",         R: 2.08 },
+  { label_fr: "Dalle + polystyrène 10cm",            label_ar: "بلاطة + بوليستيرين 10سم",        R: 2.58 },
+  { label_fr: "Dalle + polystyrène 12cm",            label_ar: "بلاطة + بوليستيرين 12سم",        R: 3.08 },
+  { label_fr: "Toiture terrasse non isolée",         label_ar: "سطح مكشوف بدون عزل",             R: 0.15 },
+  { label_fr: "Toiture terrasse + chape + laine 8cm",label_ar: "سطح + شابة + صوف 8سم",           R: 2.25 },
+  { label_fr: "Comble non isolé",                    label_ar: "سقف علوي بدون عزل",              R: 0.10 },
+  { label_fr: "Comble + laine minérale 10cm",        label_ar: "سقف علوي + صوف معدني 10سم",      R: 2.58 },
+  { label_fr: "Comble + laine minérale 20cm",        label_ar: "سقف علوي + صوف معدني 20سم",      R: 5.13 },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FLOORS  (Planchers)
+// FLOORS  (Planchers LNC) — R without surface resistances
 // ─────────────────────────────────────────────────────────────────────────────
-export const PRESETS_PLANCHERS = [
-  { val: "dalle_pleine_15cm",      label: "Dalle Pleine Béton (15cm)",             u: 2.70 },
-  { val: "corps_creux_16_4",       label: "Plancher Corps Creux (16+4)",           u: 2.05 },
-  { val: "corps_creux_20_4",       label: "Plancher Corps Creux (20+4)",           u: 1.80 },
-  { val: "manuel",                 label: "Personnalisé (Saisie Manuelle U)",      u: ""   },
+export const FLOOR_R_PRESETS = [
+  { label_fr: "Manuel",                              label_ar: "يدوي",                         R: null },
+  { label_fr: "Dalle béton 15cm",                   label_ar: "بلاطة خرسانة 15سم",             R: 0.06 },
+  { label_fr: "Dalle béton 20cm",                   label_ar: "بلاطة خرسانة 20سم",             R: 0.08 },
+  { label_fr: "Dalle + chape 5cm",                  label_ar: "بلاطة + طرطاج 5سم",             R: 0.10 },
+  { label_fr: "Dalle + polystyrène 4cm + chape",    label_ar: "بلاطة + بوليستيرين 4سم + طرطاج", R: 1.08 },
+  { label_fr: "Dalle + polystyrène 6cm + chape",    label_ar: "بلاطة + بوليستيرين 6سم + طرطاج", R: 1.58 },
+  { label_fr: "Dalle + polystyrène 8cm + chape",    label_ar: "بلاطة + بوليستيرين 8سم + طرطاج", R: 2.08 },
+  { label_fr: "Dalle + laine de roche 4cm + chape", label_ar: "بلاطة + صوف صخري 4سم + طرطاج",  R: 1.08 },
+  { label_fr: "Dalle + laine de roche 6cm + chape", label_ar: "بلاطة + صوف صخري 6سم + طرطاج",  R: 1.58 },
+  { label_fr: "Plancher bois 3cm",                  label_ar: "أرضية خشب 3سم",                 R: 0.20 },
+  { label_fr: "Plancher bois 5cm",                  label_ar: "أرضية خشب 5سم",                 R: 0.33 },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
