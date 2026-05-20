@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  PRESETS_MURS,
-  PRESETS_TOITURES,
-  PRESETS_PLANCHERS,
+  WALL_R_PRESETS,
+  ROOF_R_PRESETS,
+  FLOOR_R_PRESETS,
   VITRAGE_OPTS,
   LAME_OPTS,
   CADRE_OPTS,
@@ -11,6 +11,11 @@ import {
   gKV,
   gKP,
 } from "../data/dtrMaterials.js";
+
+// Alias legacy names used throughout the component
+const PRESETS_MURS      = WALL_R_PRESETS;
+const PRESETS_TOITURES  = ROOF_R_PRESETS;
+const PRESETS_PLANCHERS = FLOOR_R_PRESETS;
 
 // Local DTR-C3.2 default values (match dtrMaterials.js keys)
 const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";
