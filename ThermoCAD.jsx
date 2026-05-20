@@ -281,6 +281,19 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const nwid = () => `w${++wRef.current}`;
   const nrid = () => `r${++rRef.current}`;
 
+  // ── Coordinate transformation helpers ──────────────────────────────────────
+  // Convert a raw canvas-CSS pixel position → world space (accounting for pan + scale)
+  const screenToWorld = useCallback((sx, sy) => ({
+    x: (sx - pan.x) / scale,
+    y: (sy - pan.y) / scale,
+  }), [pan, scale]);
+
+  // Convert world space → canvas-CSS pixel position
+  const worldToScreen = useCallback((wx, wy) => ({
+    x: wx * scale + pan.x,
+    y: wy * scale + pan.y,
+  }), [pan, scale]);
+
   const [walls, setWalls] = useState([]);
   const [doors, setDoors] = useState([]);
   const [wins, setWins] = useState([]);
@@ -304,7 +317,10 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const keyInputRef = useRef(null);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [selectionBox, setSelectionBox] = useState(null);
   const isPanningRef = useRef(false);
+  const spacebarRef = useRef(false);
 
   const [bgImage, setBgImage] = useState(null);
   const [bgScale, setBgScale] = useState(1);
@@ -497,19 +513,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   }, [poly, sp]);
 
   const onMove = useCallback((e) => {
-    if (isPanningRef.current) {
+    if (isPanningRef.current || spacebarRef.current) {
       setPan(prev => ({ x: prev.x + e.movementX, y: prev.y + e.movementY }));
       return;
     }
     const r = cvs.current.getBoundingClientRect();
-    const scaleX = cvs.current.width / r.width;
-    const scaleY = cvs.current.height / r.height;
-    const s = getSnap(
-      (e.clientX - r.left) * scaleX - pan.x,
-      (e.clientY - r.top)  * scaleY - pan.y,
-      e
-    );
+    // Raw CSS-pixel offset on the canvas element
+    const cssX = e.clientX - r.left;
+    const cssY = e.clientY - r.top;
+    // Transform into world space
+    const { x: wx, y: wy } = screenToWorld(cssX, cssY);
+    const s = getSnap(wx, wy, e);
     setSp(s);
+
+    // Marquee: update the current corner while dragging
+    if (selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, currentX: wx, currentY: wy } : null);
+    }
+
     if (poly.length > 0 && s) {
       const last = poly[poly.length - 1];
       if (keyInput) {
@@ -522,15 +543,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         setInfo(closing ? "🟢 Cliquer pour fermer la pièce" : `📏 ${len.toFixed(2)} m   ${ang}°`);
       }
     } else { setInfo(""); }
-  }, [getSnap, poly, keyInput, pan]);
+  }, [getSnap, poly, keyInput, pan, scale, screenToWorld, selectionBox]);
 
   const onClick = useCallback((e) => {
     if (e.detail > 1) return;
     const rect = cvs.current.getBoundingClientRect();
-    const scaleX = cvs.current.width / rect.width;
-    const scaleY = cvs.current.height / rect.height;
-    const px = (e.clientX - rect.left) * scaleX - pan.x;
-    const py = (e.clientY - rect.top)  * scaleY - pan.y;
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+    const { x: px, y: py } = screenToWorld(cssX, cssY);
     let s = getSnap(px, py, e);
 
     if (mode === "select") {
@@ -634,7 +654,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         }
       }
     }
-  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, pan]);
+  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, pan, scale, screenToWorld]);
 
   const deleteSelected = useCallback(() => {
     if (!selected) return;
@@ -721,12 +741,88 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     setKeyInput("");
   }, [keyInput, sp, poly, applyKeyLength, getSnapshot, pushUndo, globalHeight]);
 
-  const onMouseDown = useCallback((e) => {
-    if (e.button === 1) { e.preventDefault(); isPanningRef.current = true; }
+  // ── Wheel zoom anchored on cursor (Task 2) ─────────────────────────────────
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    const rect = cvs.current.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+    const zoomFactor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setScale(prev => {
+      const next = Math.min(10, Math.max(0.1, prev * zoomFactor));
+      // Keep the world point under the cursor stationary:
+      // newPan = cursor - (cursor - pan) * (next / prev)
+      setPan(p => ({
+        x: cssX - (cssX - p.x) * (next / prev),
+        y: cssY - (cssY - p.y) * (next / prev),
+      }));
+      return next;
+    });
   }, []);
 
+  // ── Canvas mouseup: finalize marquee selection (Task 4) ───────────────────
+  const onMouseUp = useCallback((e) => {
+    isPanningRef.current = false;
+    if (!selectionBox) return;
+    const { startX, startY, currentX, currentY } = selectionBox;
+    const x1 = Math.min(startX, currentX);
+    const y1 = Math.min(startY, currentY);
+    const x2 = Math.max(startX, currentX);
+    const y2 = Math.max(startY, currentY);
+    // Only run if the box has meaningful size
+    if (Math.abs(x2 - x1) > 4 || Math.abs(y2 - y1) > 4) {
+      const rectContains = (px, py) => px >= x1 && px <= x2 && py >= y1 && py <= y2;
+      const hits = [];
+      for (const w of walls) {
+        if (rectContains(w.x1, w.y1) && rectContains(w.x2, w.y2))
+          hits.push({ type: "wall", id: w.id });
+      }
+      for (const d of doors) {
+        if (rectContains(d.x, d.y)) hits.push({ type: "door", id: d.id });
+      }
+      for (const wv of wins) {
+        if (rectContains(wv.x, wv.y)) hits.push({ type: "window", id: wv.id });
+      }
+      if (hits.length > 0) {
+        setSelected(hits[0]); // select first; extend later if multi-select needed
+        setActiveTab("props");
+      }
+    }
+    setSelectionBox(null);
+  }, [selectionBox, walls, doors, wins]);
+
+  const onMouseDown = useCallback((e) => {
+    // Middle-click OR spacebar+left: start panning
+    if (e.button === 1 || (e.button === 0 && spacebarRef.current)) {
+      e.preventDefault();
+      isPanningRef.current = true;
+      return;
+    }
+    // Right-click: cancel current wall drawing (Task 3)
+    if (e.button === 2) {
+      if (mode === "wall" && poly.length > 0) {
+        setPoly([]);
+        setInfo("");
+        setKeyInput("");
+        polyWallIds.current = [];
+      }
+      return;
+    }
+    // Left-click in select mode on empty space: start marquee (Task 4)
+    if (e.button === 0 && mode === "select") {
+      const rect = cvs.current.getBoundingClientRect();
+      const cssX = e.clientX - rect.left;
+      const cssY = e.clientY - rect.top;
+      const { x: wx, y: wy } = screenToWorld(cssX, cssY);
+      setSelectionBox({ startX: wx, startY: wy, currentX: wx, currentY: wy });
+    }
+  }, [mode, poly, screenToWorld]);
+
   useEffect(() => {
-    const up = (e) => { if (e.button === 1) isPanningRef.current = false; };
+    const up = (e) => {
+      if (e.button === 1) isPanningRef.current = false;
+      if (e.button === 0) isPanningRef.current = false;
+    };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, []);
@@ -735,6 +831,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const onKey = (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      // Spacebar starts pan mode
+      if (e.key === " " || e.code === "Space") { e.preventDefault(); spacebarRef.current = true; return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); return; }
       if (e.key === "Escape") {
@@ -748,8 +846,12 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       if (e.key === "Backspace" && keyInput) { setKeyInput(prev => prev.slice(0, -1)); e.preventDefault(); return; }
       if (e.key === "Enter" && keyInput) { commitTypedLength(); e.preventDefault(); }
     };
+    const onKeyUp = (e) => {
+      if (e.key === " " || e.code === "Space") spacebarRef.current = false;
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
   }, [mode, poly, keyInput, undo, redo, deleteSelected, commitTypedLength]);
 
   useEffect(() => {
@@ -757,6 +859,21 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     setRooms(prev => detectRoomsFromGraph(walls, prev, globalHeight, rRef));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walls]);
+
+  // ── Task 5: Auto-classify walls as interior (int) or exterior (ext) ────────
+  // Runs whenever walls or rooms change. Counts how many rooms share each wall.
+  // autoType is used by the export and props panel when contactOverride is unset.
+  useEffect(() => {
+    if (walls.length === 0) return;
+    setWalls(prev => prev.map(w => {
+      const sharedCount = rooms.filter(r => (r.wallIds || []).includes(w.id)).length;
+      const autoType = sharedCount >= 2 ? "int" : "ext";
+      // Only update if the value actually changed to avoid infinite loops
+      if (w.autoType === autoType) return w;
+      return { ...w, autoType };
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms]);
 
   useEffect(() => {
     const canvas = cvs.current;
@@ -769,6 +886,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     ctx.save();
     ctx.translate(pan.x, pan.y);
+    ctx.scale(scale, scale);
 
     if (bgImage) {
       ctx.save();
@@ -968,6 +1086,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       ctx.fillText(`Murs nets: ${rm.netWallArea.toFixed(2)} m²`, c.x, c.y + 24);
     });
 
+    // ── Marquee selection box (Task 4) — drawn in world space ─────────────────
+    if (selectionBox) {
+      const { startX, startY, currentX, currentY } = selectionBox;
+      const bx = Math.min(startX, currentX);
+      const by = Math.min(startY, currentY);
+      const bw = Math.abs(currentX - startX);
+      const bh = Math.abs(currentY - startY);
+      ctx.save();
+      ctx.fillStyle = "rgba(59,130,246,0.12)";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([4 / scale, 3 / scale]);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     if (sp) {
       ctx.setLineDash([]); ctx.lineWidth = 2;
       if (sp.type === "ep") {
@@ -1021,7 +1157,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     } else {
       ctx.restore(); 
     }
-  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, canvasSize]);
+  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, scale, selectionBox, canvasSize]);
 
   const exportSVG = useCallback(() => {
     let s = '<svg viewBox="0 0 840 660" xmlns="http://www.w3.org/2000/svg">';
@@ -1056,7 +1192,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       ...wallsEnriched.flatMap((w) => {
         const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
         const sharedRooms = rooms.filter(r => (r.wallIds || []).includes(w.id)).length;
-        let typeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        // Use contactOverride if explicit; fall back to autoType from Task 5; then count-based
+        let typeStr = (w.autoType === "int" || sharedRooms >= 2) ? "Mur Intérieur" : "Mur Extérieur";
         if (w.contactOverride === "ext") typeStr = "Mur Extérieur";
         if (w.contactOverride === "int") typeStr = "Mur Intérieur";
         if (w.contactOverride === "lnc") typeStr = "Mur Intérieur (LNC)";
@@ -1094,7 +1231,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         const w = walls.find(wl => wl.id === d.wid);
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
         const sharedRooms = w ? rooms.filter(r => (r.wallIds || []).includes(w.id)).length : 0;
-        let parentTypeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        let parentTypeStr = (w?.autoType === "int" || sharedRooms >= 2) ? "Mur Intérieur" : "Mur Extérieur";
         if (w?.contactOverride === "ext") parentTypeStr = "Mur Extérieur";
         if (w?.contactOverride === "int") parentTypeStr = "Mur Intérieur";
         if (w?.contactOverride === "lnc") parentTypeStr = "Mur Intérieur (LNC)";
@@ -1120,7 +1257,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         const w = walls.find(wl => wl.id === wv.wid);
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
         const sharedRooms = w ? rooms.filter(r => (r.wallIds || []).includes(w.id)).length : 0;
-        let parentTypeStr = sharedRooms < 2 ? "Mur Extérieur" : "Mur Intérieur";
+        let parentTypeStr = (w?.autoType === "int" || sharedRooms >= 2) ? "Mur Intérieur" : "Mur Extérieur";
         if (w?.contactOverride === "ext") parentTypeStr = "Mur Extérieur";
         if (w?.contactOverride === "int") parentTypeStr = "Mur Intérieur";
         if (w?.contactOverride === "lnc") parentTypeStr = "Mur Intérieur (LNC)";
@@ -1501,9 +1638,11 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
             height={canvasSize.h}
             onMouseDown={onMouseDown}
             onMouseMove={onMove}
+            onMouseUp={onMouseUp}
             onClick={onClick}
             onDoubleClick={() => { setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = []; }}
-            onContextMenu={(e) => e.preventDefault()}
+            onContextMenu={(e) => { e.preventDefault(); }}
+            onWheel={onWheel}
             style={{ display: "block", cursor: mode === "select" ? "default" : "crosshair" }}
           />
         </div>
@@ -1866,7 +2005,19 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
                             {/* Contact / Type override */}
                             <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
-                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Type de paroi (Contact)</div>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span>Type de paroi (Contact)</span>
+                                {(!w.contactOverride || w.contactOverride === "auto") && (
+                                  <span style={{
+                                    fontSize: 9, fontWeight: "700", padding: "1px 5px", borderRadius: 4,
+                                    background: w.autoType === "int" ? "rgba(251,146,60,0.15)" : "rgba(52,211,153,0.15)",
+                                    color: w.autoType === "int" ? "#fb923c" : "#34d399",
+                                    border: `1px solid ${w.autoType === "int" ? "rgba(251,146,60,0.3)" : "rgba(52,211,153,0.3)"}`,
+                                  }}>
+                                    AUTO: {w.autoType === "int" ? "Intérieur" : "Extérieur"}
+                                  </span>
+                                )}
+                              </div>
                               <select
                                 value={w.contactOverride || "auto"}
                                 onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, contactOverride: e.target.value }))}
