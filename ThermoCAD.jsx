@@ -742,6 +742,28 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walls]);
 
+  // ── Task 5: Auto-classify walls as interior (int) or exterior (ext) ────────
+  // Runs whenever walls or rooms change. Counts how many rooms share each wall.
+  // autoType is used by the export and props panel when contactOverride is unset.
+  useEffect(() => {
+    if (walls.length === 0) return;
+    setWalls(prev => {
+      let changed = false;
+      const nextWalls = prev.map(w => {
+        const sharedCount = rooms.filter(r => (r.wallIds || []).includes(w.id)).length;
+        const autoType = sharedCount >= 2 ? "int" : "ext";
+        if (w.autoType !== autoType) {
+          changed = true;
+          return { ...w, autoType };
+        }
+        return w;
+      });
+      // Bail out and return the exact same memory reference if nothing changed
+      return changed ? nextWalls : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms]);
+
   useEffect(() => {
     const canvas = cvs.current;
     if (!canvas) return;
