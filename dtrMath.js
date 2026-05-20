@@ -18,13 +18,13 @@
  * hygienic ventilation (Qvmin/Qvmax), wind infiltration (Qs), and LNC tau.
  */
 
-import { ISOLANT_OPTS } from "./dtrMaterials.js";
-import { WILAYAS, CLIMATE_ZONES } from "./algeria_climate.js";
+import { ISOLANT_OPTS } from "../data/dtrMaterials.js";
+import { WILAYAS, CLIMATE_ZONES } from "../data/algeria_climate.js";
 import {
   TBE_T, DREF_T, RS_DTR, KS52, KS53, KS58,
   QVMIN, QVMAX_CUI, QVMAX_SDB, QVMAX_WC,
   PO_T, EV_T, TAU_AUTO, CR_TABLE,
-} from "./dtrTables.js";
+} from "../data/dtrTables.js";
 
 // ─── Precision helpers ───────────────────────────────────────────────────────
 const f4 = (v) => +v.toFixed(4);
