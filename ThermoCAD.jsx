@@ -306,6 +306,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const keyInputRef = useRef(null);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [selectionBox, setSelectionBox] = useState(null); // { x1, y1, x2, y2 } in world coords
   const isPanningRef = useRef(false);
 
   const [bgImage, setBgImage] = useState(null);
@@ -486,18 +488,27 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     return { x: last.x + (dx / mag) * px, y: last.y + (dy / mag) * px };
   }, [poly, sp]);
 
+  const screenToWorld = useCallback((sx, sy) => {
+    const rect = cvs.current.getBoundingClientRect();
+    const cssScaleX = cvs.current.width / rect.width;
+    const cssScaleY = cvs.current.height / rect.height;
+    return {
+      x: ((sx - rect.left) * cssScaleX - pan.x) / scale,
+      y: ((sy - rect.top)  * cssScaleY - pan.y) / scale,
+    };
+  }, [pan, scale]);
+
   const onMove = useCallback((e) => {
     if (isPanningRef.current) {
       setPan(prev => ({ x: prev.x + e.movementX, y: prev.y + e.movementY }));
       return;
     }
-    const r = cvs.current.getBoundingClientRect();
-    const scaleX = cvs.current.width / r.width;
-    const scaleY = cvs.current.height / r.height;
-    const s = getSnap(
-      (e.clientX - r.left) * scaleX - pan.x,
-      (e.clientY - r.top)  * scaleY - pan.y
-    );
+    const { x: wx, y: wy } = screenToWorld(e.clientX, e.clientY);
+    // Expand marquee box if dragging
+    if (selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, x2: wx, y2: wy } : null);
+    }
+    const s = getSnap(wx, wy);
     setSp(s);
     if (poly.length > 0 && s) {
       const last = poly[poly.length - 1];
@@ -511,15 +522,11 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         setInfo(closing ? "🟢 Cliquer pour fermer la pièce" : `📏 ${len.toFixed(2)} m   ${ang}°`);
       }
     } else { setInfo(""); }
-  }, [getSnap, poly, keyInput, pan]);
+  }, [screenToWorld, getSnap, poly, keyInput, selectionBox]);
 
   const onClick = useCallback((e) => {
     if (e.detail > 1) return;
-    const rect = cvs.current.getBoundingClientRect();
-    const scaleX = cvs.current.width / rect.width;
-    const scaleY = cvs.current.height / rect.height;
-    const px = (e.clientX - rect.left) * scaleX - pan.x;
-    const py = (e.clientY - rect.top)  * scaleY - pan.y;
+    const { x: px, y: py } = screenToWorld(e.clientX, e.clientY);
     let s = getSnap(px, py);
 
     if (mode === "select") {
@@ -623,7 +630,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         }
       }
     }
-  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, pan]);
+  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, screenToWorld]);
 
   const deleteSelected = useCallback(() => {
     if (!selected) return;
@@ -711,14 +718,99 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   }, [keyInput, sp, poly, applyKeyLength, getSnapshot, pushUndo, globalHeight]);
 
   const onMouseDown = useCallback((e) => {
-    if (e.button === 1) { e.preventDefault(); isPanningRef.current = true; }
+    if (e.button === 1) { e.preventDefault(); isPanningRef.current = true; return; }
+    // Right-click while drawing: cancel the current wall poly
+    if (e.button === 2 && mode === "wall") {
+      setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = [];
+      return;
+    }
+    // Left-click in select mode on empty space: start marquee
+    if (e.button === 0 && mode === "select") {
+      const { x: wx, y: wy } = screenToWorld(e.clientX, e.clientY);
+      // Check if click landed on any element; if not, start marquee
+      let hit = false;
+      for (const d of doors) {
+        if (dist({ x: wx, y: wy }, { x: d.x, y: d.y }) < (d.width || DEFAULT_DOOR_W) * SC / 2 + 14) { hit = true; break; }
+      }
+      if (!hit) for (const wv of wins) {
+        if (dist({ x: wx, y: wy }, { x: wv.x, y: wv.y }) < (wv.width || DEFAULT_WIN_W) * SC / 2 + 14) { hit = true; break; }
+      }
+      if (!hit) for (const w of walls) {
+        const { pt } = projSeg({ x: wx, y: wy }, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+        if (dist({ x: wx, y: wy }, pt) < WW + 8) { hit = true; break; }
+      }
+      if (!hit) setSelectionBox({ x1: wx, y1: wy, x2: wx, y2: wy });
+    }
+  }, [mode, screenToWorld, doors, wins, walls]);
+
+  const onWheel = useCallback((e) => {
+    e.preventDefault();
+    const rect = cvs.current.getBoundingClientRect();
+    const cssScaleX = cvs.current.width / rect.width;
+    const cssScaleY = cvs.current.height / rect.height;
+    const mouseX = (e.clientX - rect.left) * cssScaleX;
+    const mouseY = (e.clientY - rect.top)  * cssScaleY;
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setScale(prev => {
+      const next = Math.min(10, Math.max(0.1, prev * zoomFactor));
+      // Adjust pan so zoom anchors on the mouse cursor position
+      setPan(p => ({
+        x: mouseX - (mouseX - p.x) * (next / prev),
+        y: mouseY - (mouseY - p.y) * (next / prev),
+      }));
+      return next;
+    });
   }, []);
+
+  const onMouseUp = useCallback((e) => {
+    if (e.button === 1) { isPanningRef.current = false; return; }
+    if (!selectionBox) return;
+    const bx1 = Math.min(selectionBox.x1, selectionBox.x2);
+    const bx2 = Math.max(selectionBox.x1, selectionBox.x2);
+    const by1 = Math.min(selectionBox.y1, selectionBox.y2);
+    const by2 = Math.max(selectionBox.y1, selectionBox.y2);
+    const boxW = bx2 - bx1, boxH = by2 - by1;
+    // Only commit if the user dragged a meaningful box (> 4px)
+    if (boxW > 4 || boxH > 4) {
+      const hitIds = [];
+      walls.forEach(w => {
+        const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+        if (mx >= bx1 && mx <= bx2 && my >= by1 && my <= by2)
+          hitIds.push({ type: "wall", id: w.id });
+      });
+      doors.forEach(d => {
+        if (d.x >= bx1 && d.x <= bx2 && d.y >= by1 && d.y <= by2)
+          hitIds.push({ type: "door", id: d.id });
+      });
+      wins.forEach(wv => {
+        if (wv.x >= bx1 && wv.x <= bx2 && wv.y >= by1 && wv.y <= by2)
+          hitIds.push({ type: "window", id: wv.id });
+      });
+      if (hitIds.length === 1) { setSelected(hitIds[0]); setActiveTab("props"); }
+      else if (hitIds.length > 1) { setSelected(hitIds[0]); setActiveTab("props"); }
+    }
+    setSelectionBox(null);
+  }, [selectionBox, walls, doors, wins]);
 
   useEffect(() => {
     const up = (e) => { if (e.button === 1) isPanningRef.current = false; };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, []);
+
+  // Attach wheel as non-passive so preventDefault() works for zoom
+  useEffect(() => {
+    const el = cvs.current;
+    if (!el) return;
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [onWheel]);
+
+  // Global mouseup for middle-pan release and marquee commit
+  useEffect(() => {
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [onMouseUp]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -780,6 +872,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     ctx.save();
     ctx.translate(pan.x, pan.y);
+    ctx.scale(scale, scale);
 
     if (bgImage) {
       ctx.save();
@@ -1032,7 +1125,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     } else {
       ctx.restore(); 
     }
-  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, canvasSize]);
+
+    // ── Marquee selection rectangle (drawn in screen space after restore) ──
+    if (selectionBox) {
+      const sx1 = selectionBox.x1 * scale + pan.x;
+      const sy1 = selectionBox.y1 * scale + pan.y;
+      const sx2 = selectionBox.x2 * scale + pan.x;
+      const sy2 = selectionBox.y2 * scale + pan.y;
+      const rx = Math.min(sx1, sx2), ry = Math.min(sy1, sy2);
+      const rw = Math.abs(sx2 - sx1), rh = Math.abs(sy2 - sy1);
+      ctx.fillStyle = "rgba(59,130,246,0.12)";
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = "rgba(59,130,246,0.8)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+    }
+  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, scale, canvasSize, selectionBox]);
 
   const exportSVG = useCallback(() => {
     let s = '<svg viewBox="0 0 840 660" xmlns="http://www.w3.org/2000/svg">';
@@ -1076,9 +1186,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
           bridgeLength: w.length,
           psi: 0.45,
-          // DTR C3.2 default — Double paroi brique (10+air+10)
-          composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
+          composition: typeof w.composition === "number" ? w.composition : 0,
+          rValue: typeof w.rValue === "number" ? w.rValue : 0.48,
           isolantMat:       w.isolantMat       || "aucun",
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
@@ -1794,9 +1903,10 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
                       {selected.type === "wall" && (() => {
                         const w = selectedEl;
-                        const wallPreset = w.composition || DTR_DEFAULT_WALL_PRESET;
-                        const isManualWall = wallPreset === "manuel" || !PRESETS_MURS.some(p => p.val === wallPreset);
-                        const resolvedPreset = isManualWall ? "manuel" : wallPreset;
+                        // composition is stored as an integer index into WALL_R_PRESETS
+                        const compIdx = typeof w.composition === "number" ? w.composition : -1;
+                        const isManual = compIdx < 0 || compIdx >= WALL_R_PRESETS.length;
+                        const resolvedIdx = isManual ? -1 : compIdx;
                         return (
                           <div>
                             <StatRow label="Longueur" val={`${w.length.toFixed(3)} m`} col="#60a5fa" />
@@ -1813,7 +1923,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
 
-                            {/* NOUVEAU: Isolation Thermique */}
+                            {/* Isolation Thermique */}
                             <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Isolation (Optionnel)</div>
                               <select
@@ -1844,18 +1954,18 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                               )}
                             </div>
 
-                            {/* DTR C3.2 — Wall material preset */}
+                            {/* DTR C3.2 — Wall material preset (R-value paradigm) */}
                             <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Matériau (DTR C3.2)</div>
                               <select
-                                value={resolvedPreset}
+                                value={resolvedIdx}
                                 onChange={e => {
-                                  const val = e.target.value;
-                                  const preset = PRESETS_MURS.find(p => p.val === val);
+                                  const idx = parseInt(e.target.value, 10);
+                                  const preset = idx >= 0 ? WALL_R_PRESETS[idx] : null;
                                   setWalls(prev => prev.map(x => x.id !== w.id ? x : {
                                     ...x,
-                                    composition: val,
-                                    ...(preset && preset.u !== "" ? { uValue: preset.u } : {}),
+                                    composition: idx,
+                                    ...(preset ? { rValue: preset.R } : {}),
                                   }));
                                 }}
                                 style={{
@@ -1863,20 +1973,21 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                   borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
                                 }}
                               >
-                                {PRESETS_MURS.map(p => (
-                                  <option key={p.val} value={p.val}>{p.label}</option>
+                                <option value={-1}>— Manuel —</option>
+                                {WALL_R_PRESETS.map((p, i) => (
+                                  <option key={i} value={i}>{p.label}</option>
                                 ))}
                               </select>
-                              {resolvedPreset !== "manuel" && safeNum(w.uValue) !== null && (
+                              {resolvedIdx >= 0 && safeNum(w.rValue) !== null && (
                                 <div style={{ color: "#60a5fa", fontSize: 11, fontFamily: "monospace", marginTop: 4 }}>
-                                  U = {Number(w.uValue).toFixed(2)} W/m²K
+                                  R = {Number(w.rValue).toFixed(2)} m²K/W
                                 </div>
                               )}
-                              {resolvedPreset === "manuel" && (
-                                <input type="number" min="0.01" max="10" step="0.01"
-                                  value={w.uValue ?? ""}
-                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, uValue: Number(e.target.value) }))}
-                                  placeholder="U manuel (W/m²K)"
+                              {resolvedIdx < 0 && (
+                                <input type="number" min="0.01" max="100" step="0.01"
+                                  value={w.rValue ?? ""}
+                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, rValue: Number(e.target.value) }))}
+                                  placeholder="R manuel (m²K/W)"
                                   style={{
                                     width: "100%", background: "#122032", border: "1px solid #1f3248",
                                     borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 4,
