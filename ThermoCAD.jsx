@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  PRESETS_MURS,
-  PRESETS_TOITURES,
-  PRESETS_PLANCHERS,
+  WALL_R_PRESETS,
+  ROOF_R_PRESETS,
+  FLOOR_R_PRESETS,
   VITRAGE_OPTS,
   LAME_OPTS,
   CADRE_OPTS,
@@ -12,12 +12,12 @@ import {
   gKP,
 } from "./dtrMaterials.js";
 
-// Local DTR-C3.2 default values (match dtrMaterials.js keys)
-const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";
+// Local DTR-C3.2 default values (match RoomEditor.jsx indices)
+const DTR_DEFAULT_WALL_PRESET = 14;
 const DTR_DEFAULT_WALL_U      = 1.28;
-const DTR_DEFAULT_ROOF_PRESET = "terrasse_isol_8cm";
+const DTR_DEFAULT_ROOF_PRESET = 13;
 const DTR_DEFAULT_ROOF_U      = 0.48;
-const DTR_DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm";
+const DTR_DEFAULT_FLOOR_PRESET = 4;
 const DTR_DEFAULT_FLOOR_U     = 2.70;
 const DTR_DEFAULT_WIN_TYPE    = "double";
 const DTR_DEFAULT_WIN_LAME    = "10_11";
@@ -1767,8 +1767,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
                       {selected.type === "wall" && (() => {
                         const w = selectedEl;
-                        const wallPreset = w.composition || DTR_DEFAULT_WALL_PRESET;
-                        const isManualWall = wallPreset === "manuel" || !PRESETS_MURS.some(p => p.val === wallPreset);
+                        const wallPreset = w.composition ?? DTR_DEFAULT_WALL_PRESET;
+                        const isManualWall = wallPreset === "manuel" || WALL_R_PRESETS[wallPreset] == null;
                         const resolvedPreset = isManualWall ? "manuel" : wallPreset;
                         return (
                           <div>
@@ -1824,11 +1824,16 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                 value={resolvedPreset}
                                 onChange={e => {
                                   const val = e.target.value;
-                                  const preset = PRESETS_MURS.find(p => p.val === val);
+                                  if (val === "manuel") {
+                                    setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, composition: "manuel" }));
+                                    return;
+                                  }
+                                  const i = parseInt(val, 10);
+                                  const preset = WALL_R_PRESETS[i];
                                   setWalls(prev => prev.map(x => x.id !== w.id ? x : {
                                     ...x,
-                                    composition: val,
-                                    ...(preset && preset.u !== "" ? { uValue: preset.u } : {}),
+                                    composition: i,
+                                    ...(preset && preset.R !== null ? { rValue: preset.R } : {}),
                                   }));
                                 }}
                                 style={{
@@ -1836,8 +1841,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                   borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
                                 }}
                               >
-                                {PRESETS_MURS.map(p => (
-                                  <option key={p.val} value={p.val}>{p.label}</option>
+                                {WALL_R_PRESETS.map((p, i) => (
+                                  <option key={i} value={p.R === null ? "manuel" : i} style={{ background: "#122032", color: "#cbd5e1" }}>{p.label_fr}</option>
                                 ))}
                               </select>
                               {resolvedPreset !== "manuel" && safeNum(w.uValue) !== null && (
