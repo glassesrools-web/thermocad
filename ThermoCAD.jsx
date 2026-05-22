@@ -12,10 +12,10 @@ import {
   gKP
 } from "../data/dtrMaterials.js";
 
-// Local DTR-C3.2 default values (match RoomEditor.jsx indices)
+// Local DTR-C3.2 default values (match dtrMaterials.js indexes)
 const DTR_DEFAULT_WALL_PRESET = 14;
 const DTR_DEFAULT_WALL_U      = 1.28;
-const DTR_DEFAULT_ROOF_PRESET = 13;
+const DTR_DEFAULT_ROOF_PRESET = 14;
 const DTR_DEFAULT_ROOF_U      = 0.48;
 const DTR_DEFAULT_FLOOR_PRESET = 4;
 const DTR_DEFAULT_FLOOR_U     = 2.70;
@@ -1786,7 +1786,24 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
 
-                            {/* NOUVEAU: Isolation Thermique */}
+                            {/* Type de Contact */}
+                            <div style={{ marginTop: 8, marginBottom: 8 }}>
+                              <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Type de contact</div>
+                              <select
+                                value={w.contactOverride ?? "EXT"}
+                                onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, contactOverride: e.target.value }))}
+                                style={{
+                                  width: "100%", background: "#122032", border: "1px solid #1f3248",
+                                  borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
+                                }}
+                              >
+                                <option value="EXT" style={{ background: "#122032", color: "#cbd5e1" }}>Extérieur</option>
+                                <option value="INT" style={{ background: "#122032", color: "#cbd5e1" }}>Intérieur (mitoyen)</option>
+                                <option value="LNC" style={{ background: "#122032", color: "#cbd5e1" }}>Local Non Chauffé (LNC)</option>
+                              </select>
+                            </div>
+
+                            {/* Isolation Thermique */}
                             <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Isolation (Optionnel)</div>
                               <select
@@ -1798,7 +1815,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                 }}
                               >
                                 {ISOLANT_OPTS.map(o => (
-                                  <option key={o.val} value={o.val}>{o.label}</option>
+                                  <option key={o.val} value={o.val} style={{ background: "#122032", color: "#cbd5e1" }}>{o.label}</option>
                                 ))}
                               </select>
                               {w.isolantMat && w.isolantMat !== "aucun" && (
@@ -1845,16 +1862,16 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                                   <option key={i} value={p.R === null ? "manuel" : i} style={{ background: "#122032", color: "#cbd5e1" }}>{p.label_fr}</option>
                                 ))}
                               </select>
-                              {resolvedPreset !== "manuel" && safeNum(w.uValue) !== null && (
+                              {resolvedPreset !== "manuel" && safeNum(w.rValue) !== null && (
                                 <div style={{ color: "#60a5fa", fontSize: 11, fontFamily: "monospace", marginTop: 4 }}>
-                                  U = {Number(w.uValue).toFixed(2)} W/m²K
+                                  R = {Number(w.rValue).toFixed(3)} m²K/W
                                 </div>
                               )}
                               {resolvedPreset === "manuel" && (
                                 <input type="number" min="0.01" max="10" step="0.01"
-                                  value={w.uValue ?? ""}
-                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, uValue: Number(e.target.value) }))}
-                                  placeholder="U manuel (W/m²K)"
+                                  value={w.rValue ?? ""}
+                                  onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, rValue: Number(e.target.value) }))}
+                                  placeholder="R manuel (m²K/W)"
                                   style={{
                                     width: "100%", background: "#122032", border: "1px solid #1f3248",
                                     borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginTop: 4,
