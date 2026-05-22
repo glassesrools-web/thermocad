@@ -823,6 +823,15 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       if (w.length > 0.15 && showDimensions) {
         const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
         const ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
+        // Compute live contact badge for this wall
+        const wOwnerCount = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+        const wContactMode = w.contactOverride || "AUTO";
+        const wEffective = wContactMode === "AUTO"
+          ? (wOwnerCount >= 2 ? "LNC" : "EXT") : wContactMode;
+        const contactBadgeColor = wEffective === "LNC" ? "#f59e0b"
+          : wEffective === "INT" ? "#6b7280"
+          : wEffective === "EXT" ? "#38bdf8" : "#a78bfa";
+        const contactLabel = wContactMode === "AUTO" ? `⟳${wEffective}` : wEffective;
         ctx.save(); ctx.translate(mx, my); ctx.rotate(ang); ctx.textAlign = "center";
         ctx.fillStyle = isSel ? "#fbbf24" : "#3d5a78";
         ctx.font = isSel ? "bold 10px monospace" : "10px monospace";
@@ -835,6 +844,10 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           ctx.font = "9px monospace";
           ctx.fillText(`${w.grossArea.toFixed(2)} m²`, 0, 13);
         }
+        // Contact badge — drawn above the length label
+        ctx.fillStyle = contactBadgeColor;
+        ctx.font = "bold 8px monospace";
+        ctx.fillText(contactLabel, 0, -19);
         ctx.restore();
       }
     });
@@ -1038,64 +1051,84 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     }
     const data = [
       ...wallsEnriched.map((w) => {
-        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
-        return {
+        const wallOwnerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+        const ownerRoom = wallOwnerRooms[0] ?? null;
+        const contactMode = w.contactOverride || "AUTO";
+        const effectiveContact = contactMode === "AUTO"
+          ? (wallOwnerRooms.length >= 2 ? "LNC" : "EXT")
+          : contactMode;
+            return [{
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType: effectiveContact === "LNC" ? "Mur sur LNC" : "Mur Extérieur",
+          contact: effectiveContact,
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
           orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
           bridgeLength: w.length,
           psi: 0.45,
-          // DTR C3.2 default — Double paroi brique (10+air+10)
-          composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
+          composition: w.composition ?? DTR_DEFAULT_WALL_PRESET,
+          uValue: w.uValue ?? DTR_DEFAULT_WALL_U,
+          rValue: w.rValue ?? null,
           isolantMat:       w.isolantMat       || "aucun",
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
-      }),
+        }];
+      }).flat(),
       ...doors.map((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const w = walls.find(wl => wl.id === d.wid);
-        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const doorOwnerRooms = w ? rooms.filter(rm => (rm.wallIds || []).includes(w.id)) : [];
+        const ownerRoom = doorOwnerRooms[0] ?? null;
+        const doorContactMode = w ? (w.contactOverride || "AUTO") : "EXT";
+        const doorEffectiveContact = doorContactMode === "AUTO"
+          ? (doorOwnerRooms.length >= 2 ? "LNC" : "EXT")
+          : doorContactMode;
+        return [{
           id: `cad-door-${d.id}`,
           group: "vertical",
           elementType: "Porte",
+          contact: doorEffectiveContact,
           width: dw,
           height: dh,
           area: dw * dh,
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
+          uValue: d.uValue ?? null,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
-      }),
+        }];
+      }).flat(),
       ...wins.map((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const w = walls.find(wl => wl.id === wv.wid);
-        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const winOwnerRooms = w ? rooms.filter(rm => (rm.wallIds || []).includes(w.id)) : [];
+        const ownerRoom = winOwnerRooms[0] ?? null;
+        const winContactMode = w ? (w.contactOverride || "AUTO") : "EXT";
+        const winEffectiveContact = winContactMode === "AUTO"
+          ? (winOwnerRooms.length >= 2 ? "LNC" : "EXT")
+          : winContactMode;
+        return [{
           id: `cad-win-${wv.id}`,
           group: "vertical",
           elementType: "Fenêtre",
+          contact: winEffectiveContact,
           width: vw,
           height: vh,
           area: vw * vh,
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
+          uValue: wv.uValue ?? null,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
-      }),
+        }];
+      }).flat(),
       // ── Horizontal elements (per room) with thermal bridges ────────────
       ...rooms.map((rm) => {
         const perim = wallsEnriched
