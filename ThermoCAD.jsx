@@ -9,8 +9,8 @@ import {
   MATERIAU_OPTS,
   ISOLANT_OPTS,
   gKV,
-  gKP,
-} from "./dtrMaterials.js";
+  gKP
+} from "../data/dtrMaterials.js";
 
 // Local DTR-C3.2 default values (match RoomEditor.jsx indices)
 const DTR_DEFAULT_WALL_PRESET = 14;
