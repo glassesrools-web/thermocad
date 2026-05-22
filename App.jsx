@@ -87,6 +87,7 @@ export default function App() {
   const updateRoom = useCallback((localId, roomId, updates) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, ...updates } : r ) }; }) })); }, []);
   const addSurface = useCallback((localId, roomId, group = "vertical") => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: [...(r.surfaces ?? []), createSurface(group)] } : r ) }; }) })); }, []);
   const importSurfaces = useCallback((localId, roomId, surfaces) => { if (!Array.isArray(surfaces) || surfaces.length === 0) return; setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: [...(r.surfaces ?? []), ...surfaces] } : r ) }; }) })); }, []);
+  const replaceCadSurfaces = useCallback((cadSurfaces) => { if (!Array.isArray(cadSurfaces) || cadSurfaces.length === 0) return; setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => ({ ...l, rooms: (l.rooms ?? []).map((r) => ({ ...r, surfaces: (r.surfaces ?? []).filter((s) => !String(s.id).startsWith("cad-")) })) })) })); }, []);
   const updateSurface = useCallback((localId, roomId, surfaceId, updates) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => { if (r.id !== roomId) return r; return { ...r, surfaces: (r.surfaces ?? []).map((s) => s.id === surfaceId ? { ...s, ...updates } : s ) }; }) }; }) })); }, []);
   const removeSurface = useCallback((localId, roomId, surfaceId) => { setProject((p) => ({ ...p, locals: (p.locals ?? []).map((l) => { if (l.id !== localId) return l; return { ...l, rooms: (l.rooms ?? []).map((r) => r.id === roomId ? { ...r, surfaces: (r.surfaces ?? []).filter((s) => s.id !== surfaceId) } : r ) }; }) })); }, []);
 
@@ -130,7 +131,14 @@ export default function App() {
     let lastRoomId  = null;
 
     setProject((p) => {
-      let nextLocals = p.locals.map(l => ({ ...l, rooms: l.rooms.map(r => ({ ...r })) }));
+      // First pass: strip all previously CAD-imported surfaces so re-export replaces, not appends
+      let nextLocals = p.locals.map(l => ({
+        ...l,
+        rooms: l.rooms.map(r => ({
+          ...r,
+          surfaces: (r.surfaces ?? []).filter(s => !String(s.id).startsWith("cad-")),
+        })),
+      }));
 
       const appendTo = (localId, roomId, surfs) => {
         nextLocals = nextLocals.map(l => {
