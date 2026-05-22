@@ -301,7 +301,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const keyInputRef = useRef(null);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const isPanningRef = useRef(false);
+  const isSpacePanRef = useRef(false);
 
   const [bgImage, setBgImage] = useState(null);
   const [bgScale, setBgScale] = useState(1);
@@ -482,7 +484,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   }, [poly, sp]);
 
   const onMove = useCallback((e) => {
-    if (isPanningRef.current) {
+    if (isPanningRef.current || isSpacePanRef.current) {
       setPan(prev => ({ x: prev.x + e.movementX, y: prev.y + e.movementY }));
       return;
     }
@@ -490,8 +492,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const scaleX = cvs.current.width / r.width;
     const scaleY = cvs.current.height / r.height;
     const s = getSnap(
-      (e.clientX - r.left) * scaleX - pan.x,
-      (e.clientY - r.top)  * scaleY - pan.y
+      ((e.clientX - r.left) * scaleX - pan.x) / zoom,
+      ((e.clientY - r.top)  * scaleY - pan.y) / zoom
     );
     setSp(s);
     if (poly.length > 0 && s) {
@@ -513,8 +515,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const rect = cvs.current.getBoundingClientRect();
     const scaleX = cvs.current.width / rect.width;
     const scaleY = cvs.current.height / rect.height;
-    const px = (e.clientX - rect.left) * scaleX - pan.x;
-    const py = (e.clientY - rect.top)  * scaleY - pan.y;
+    const px = ((e.clientX - rect.left) * scaleX - pan.x) / zoom;
+    const py = ((e.clientY - rect.top)  * scaleY - pan.y) / zoom;
     let s = getSnap(px, py);
 
     if (mode === "select") {
@@ -706,11 +708,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   }, [keyInput, sp, poly, applyKeyLength, getSnapshot, pushUndo, globalHeight]);
 
   const onMouseDown = useCallback((e) => {
-    if (e.button === 1) { e.preventDefault(); isPanningRef.current = true; }
+    if (e.button === 1 || e.button === 2) { e.preventDefault(); isPanningRef.current = true; }
+    if (isSpacePanRef.current && e.button === 0) { e.preventDefault(); isPanningRef.current = true; }
   }, []);
 
   useEffect(() => {
-    const up = (e) => { if (e.button === 1) isPanningRef.current = false; };
+    const up = (e) => {
+      if (e.button === 1 || e.button === 2 || e.button === 0) isPanningRef.current = false;
+    };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
   }, []);
@@ -719,6 +724,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const onKey = (e) => {
       const tag = e.target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === " ") { e.preventDefault(); isSpacePanRef.current = true; return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); return; }
       if (e.key === "Escape") {
@@ -732,9 +738,40 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       if (e.key === "Backspace" && keyInput) { setKeyInput(prev => prev.slice(0, -1)); e.preventDefault(); return; }
       if (e.key === "Enter" && keyInput) { commitTypedLength(); e.preventDefault(); }
     };
+    const onKeyUp = (e) => {
+      if (e.key === " ") { isSpacePanRef.current = false; isPanningRef.current = false; }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [mode, poly, keyInput, undo, redo, deleteSelected, commitTypedLength]);
+
+  useEffect(() => {
+    const canvas = cvs.current;
+    if (!canvas) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+      setZoom(prevZ => {
+        const newZ = Math.min(10, Math.max(0.1, prevZ * factor));
+        setPan(prevP => ({
+          x: mouseX - (mouseX - prevP.x) * (newZ / prevZ),
+          y: mouseY - (mouseY - prevP.y) * (newZ / prevZ),
+        }));
+        return newZ;
+      });
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
 
   useEffect(() => {
     if (skipRoomDetect.current) { skipRoomDetect.current = false; return; }
@@ -753,6 +790,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     ctx.save();
     ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
 
     if (bgImage) {
       ctx.save();
@@ -808,6 +846,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     wallsEnriched.forEach(w => {
       const isSel = selected?.id === w.id && selected?.type === "wall";
+      // Resolve live contact type for color coding
+      const _owners = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+      const _mode = w.contactOverride || "AUTO";
+      const _contact = _mode === "AUTO" ? (_owners >= 2 ? "LNC" : "EXT") : _mode;
+      const wallColor = isSel ? "#fbbf24"
+        : _contact === "LNC" ? "#f59e0b"
+        : _contact === "INT" ? "#4b5563"
+        : "#38bdf8"; // EXT = cyan
       if (isSel) {
         ctx.save();
         ctx.strokeStyle = "rgba(251,191,36,0.14)"; ctx.lineWidth = WW + 18; ctx.lineCap = "round";
@@ -815,7 +861,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
         ctx.restore();
       }
-      ctx.strokeStyle = isSel ? "#fbbf24" : "#a8c0d8";
+      ctx.strokeStyle = wallColor;
       ctx.lineWidth = isSel ? WW + 2 : WW;
       ctx.lineCap = "square"; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
@@ -823,17 +869,22 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       if (w.length > 0.15 && showDimensions) {
         const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
         const ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
+        const badgeLabel = _mode === "AUTO" ? `⟳${_contact}` : _contact;
         ctx.save(); ctx.translate(mx, my); ctx.rotate(ang); ctx.textAlign = "center";
+        // Contact badge above length
+        ctx.fillStyle = wallColor;
+        ctx.font = "bold 8px monospace";
+        ctx.fillText(badgeLabel, 0, -22);
         ctx.fillStyle = isSel ? "#fbbf24" : "#3d5a78";
         ctx.font = isSel ? "bold 10px monospace" : "10px monospace";
-        ctx.fillText(`${w.length.toFixed(2)} m`, 0, -8);
+        ctx.fillText(`${w.length.toFixed(2)} m`, 0, -11);
         if (w.openingArea > 0) {
           ctx.fillStyle = "#22c55e"; ctx.font = "9px monospace";
-          ctx.fillText(`Net: ${w.netArea.toFixed(2)} m²`, 0, 13);
+          ctx.fillText(`Net: ${w.netArea.toFixed(2)} m²`, 0, 4);
         } else {
           ctx.fillStyle = isSel ? "rgba(251,191,36,0.65)" : "#253545";
           ctx.font = "9px monospace";
-          ctx.fillText(`${w.grossArea.toFixed(2)} m²`, 0, 13);
+          ctx.fillText(`${w.grossArea.toFixed(2)} m²`, 0, 4);
         }
         ctx.restore();
       }
@@ -1005,7 +1056,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     } else {
       ctx.restore(); 
     }
-  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, canvasSize]);
+  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, zoom, canvasSize]);
 
   const exportSVG = useCallback(() => {
     let s = '<svg viewBox="0 0 840 660" xmlns="http://www.w3.org/2000/svg">';
@@ -1036,65 +1087,84 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       console.warn("ThermoCAD: onExportSurfaces prop non fourni.");
       return;
     }
+    // Helper: resolve effective contact for a wall
+    const resolveContact = (wall) => {
+      const ownerCount = rooms.filter(rm => (rm.wallIds || []).includes(wall.id)).length;
+      const mode = wall.contactOverride || "AUTO";
+      return mode === "AUTO" ? (ownerCount >= 2 ? "LNC" : "EXT") : mode;
+    };
+
     const data = [
-      ...wallsEnriched.map((w) => {
-        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
-        return {
+      ...wallsEnriched.flatMap((w) => {
+        const contact = resolveContact(w);
+        if (contact === "INT") return [];           // interior walls skipped
+        const ownerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+        const ownerRoom = ownerRooms[0] ?? null;
+        return [{
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType: contact === "LNC" ? "Mur sur LNC" : "Mur Extérieur",
+          contact,
           width: w.length,
           height: w.height || DEFAULT_H,
-          area: w.netArea,
+          area: w.netArea > 0 ? w.netArea : w.grossArea,
           orientation: getOrientation(w.x1, w.y1, w.x2, w.y2),
           bridgeLength: w.length,
           psi: 0.45,
-          // DTR C3.2 default — Double paroi brique (10+air+10)
-          composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
-          isolantMat:       w.isolantMat       || "aucun",
+          composition: w.composition ?? DTR_DEFAULT_WALL_PRESET,
+          uValue: w.uValue ?? DTR_DEFAULT_WALL_U,
+          rValue: w.rValue ?? null,
+          isolantMat: w.isolantMat || "aucun",
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
-          roomId:   ownerRoom ? ownerRoom.id   : null,
+          roomId: ownerRoom ? ownerRoom.id : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...doors.map((d) => {
+      ...doors.flatMap((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
-        const w = walls.find(wl => wl.id === d.wid);
-        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const wall = walls.find(wl => wl.id === d.wid);
+        const contact = wall ? resolveContact(wall) : "EXT";
+        if (contact === "INT") return [];
+        const ownerRoom = wall ? (rooms.filter(rm => (rm.wallIds || []).includes(wall.id))[0] ?? null) : null;
+        return [{
           id: `cad-door-${d.id}`,
           group: "vertical",
           elementType: "Porte",
+          contact,
           width: dw,
           height: dh,
           area: dw * dh,
-          orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
+          orientation: wall ? getOrientation(wall.x1, wall.y1, wall.x2, wall.y2) : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
-          roomId:   ownerRoom ? ownerRoom.id   : null,
+          uValue: d.uValue ?? null,
+          roomId: ownerRoom ? ownerRoom.id : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...wins.map((wv) => {
+      ...wins.flatMap((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
-        const w = walls.find(wl => wl.id === wv.wid);
-        const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        const wall = walls.find(wl => wl.id === wv.wid);
+        const contact = wall ? resolveContact(wall) : "EXT";
+        if (contact === "INT") return [];
+        const ownerRoom = wall ? (rooms.filter(rm => (rm.wallIds || []).includes(wall.id))[0] ?? null) : null;
+        return [{
           id: `cad-win-${wv.id}`,
           group: "vertical",
           elementType: "Fenêtre",
+          contact,
           width: vw,
           height: vh,
           area: vw * vh,
-          orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
+          orientation: wall ? getOrientation(wall.x1, wall.y1, wall.x2, wall.y2) : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
-          roomId:   ownerRoom ? ownerRoom.id   : null,
+          uValue: wv.uValue ?? null,
+          roomId: ownerRoom ? ownerRoom.id : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
       // ── Horizontal elements (per room) with thermal bridges ────────────
       ...rooms.map((rm) => {
@@ -1785,6 +1855,38 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <StatRow label="Surface brute"  val={`${w.grossArea.toFixed(3)} m²`} col="#a78bfa" />
                             <StatRow label="Ouvertures"     val={`${w.openingArea.toFixed(3)} m²`} col="#f87171" />
                             <StatRow label="Surface nette"  val={`${w.netArea.toFixed(3)} m²`} col="#34d399" />
+
+                            {/* Contact type override */}
+                            <div style={{ marginTop: 8, marginBottom: 8 }}>
+                              {(() => {
+                                const ownerCount = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+                                const autoResult = ownerCount >= 2 ? "LNC" : "EXT";
+                                const badgeCol = (w.contactOverride || "AUTO") === "AUTO"
+                                  ? (autoResult === "LNC" ? "#f59e0b" : "#38bdf8")
+                                  : w.contactOverride === "LNC" ? "#f59e0b"
+                                  : w.contactOverride === "INT" ? "#6b7280" : "#38bdf8";
+                                return (
+                                  <>
+                                    <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>
+                                      Type de contact
+                                      <span style={{ marginLeft: 6, color: badgeCol, fontWeight: "700" }}>
+                                        [{(w.contactOverride || "AUTO") === "AUTO" ? `AUTO → ${autoResult}` : w.contactOverride}]
+                                      </span>
+                                    </div>
+                                    <select
+                                      value={w.contactOverride || "AUTO"}
+                                      onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, contactOverride: e.target.value }))}
+                                      style={{ width: "100%", background: "#122032", border: "1px solid #1f3248", borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px" }}
+                                    >
+                                      <option value="AUTO">Auto (2 pièces = LNC, 1 = EXT)</option>
+                                      <option value="EXT">Extérieur forcé</option>
+                                      <option value="LNC">LNC forcé</option>
+                                      <option value="INT">Intérieur (ignoré à l&apos;export)</option>
+                                    </select>
+                                  </>
+                                );
+                              })()}
+                            </div>
 
                             {/* NOUVEAU: Isolation Thermique */}
                             <div style={{ marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #1f3248" }}>

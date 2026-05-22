@@ -130,7 +130,14 @@ export default function App() {
     let lastRoomId  = null;
 
     setProject((p) => {
-      let nextLocals = p.locals.map(l => ({ ...l, rooms: l.rooms.map(r => ({ ...r })) }));
+      // Strip all previously CAD-imported surfaces so re-export replaces instead of appending
+      let nextLocals = p.locals.map(l => ({
+        ...l,
+        rooms: l.rooms.map(r => ({
+          ...r,
+          surfaces: (r.surfaces ?? []).filter(s => !String(s.id).startsWith("cad-")),
+        })),
+      }));
 
       const appendTo = (localId, roomId, surfs) => {
         nextLocals = nextLocals.map(l => {
