@@ -1037,12 +1037,26 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
       return;
     }
     const data = [
-      ...wallsEnriched.map((w) => {
-        const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
-        return {
+      ...wallsEnriched.flatMap((w) => {
+            // Count how many rooms claim this wall
+            const ownerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+            
+            // Resolve AUTO contact
+            const contactMode = w.contactOverride || "AUTO";
+            let effectiveContact = contactMode;
+            if (contactMode === "AUTO") {
+              effectiveContact = ownerRooms.length >= 2 ? "LNC" : "EXT";
+            }
+
+            // If chosen/resolved to be interior, completely ignore it
+            if (effectiveContact === "INT") return [];
+            
+            const ownerRoom = ownerRooms[0] ?? null;
+            return [{
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType: effectiveContact === "LNC" ? "Mur sur LNC" : "Mur Extérieur",
+          contact: effectiveContact === "LNC" ? "lnc" : "exterieur",
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
@@ -1056,14 +1070,22 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...doors.map((d) => {
+      ...doors.flatMap((d) => {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const w = walls.find(wl => wl.id === d.wid);
+        
+        if (w) {
+          const ownerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+          const contactMode = w.contactOverride || "AUTO";
+          const effectiveContact = contactMode === "AUTO" ? (ownerRooms.length >= 2 ? "LNC" : "EXT") : contactMode;
+          if (effectiveContact === "INT") return [];
+        }
+
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        return [{
           id: `cad-door-${d.id}`,
           group: "vertical",
           elementType: "Porte",
@@ -1075,14 +1097,22 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
-      ...wins.map((wv) => {
+      ...wins.flatMap((wv) => {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const w = walls.find(wl => wl.id === wv.wid);
+        
+        if (w) {
+          const ownerRooms = rooms.filter(rm => (rm.wallIds || []).includes(w.id));
+          const contactMode = w.contactOverride || "AUTO";
+          const effectiveContact = contactMode === "AUTO" ? (ownerRooms.length >= 2 ? "LNC" : "EXT") : contactMode;
+          if (effectiveContact === "INT") return [];
+        }
+
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
-        return {
+        return [{
           id: `cad-win-${wv.id}`,
           group: "vertical",
           elementType: "Fenêtre",
@@ -1094,7 +1124,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.10,
           roomId:   ownerRoom ? ownerRoom.id   : null,
           roomName: ownerRoom ? ownerRoom.name : "Non assigné",
-        };
+        }];
       }),
       // ── Horizontal elements (per room) with thermal bridges ────────────
       ...rooms.map((rm) => {
@@ -1790,16 +1820,17 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                             <div style={{ marginTop: 8, marginBottom: 8 }}>
                               <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 4 }}>Type de contact</div>
                               <select
-                                value={w.contactOverride ?? "EXT"}
+                                value={w.contactOverride || "AUTO"}
                                 onChange={e => setWalls(prev => prev.map(x => x.id !== w.id ? x : { ...x, contactOverride: e.target.value }))}
                                 style={{
                                   width: "100%", background: "#122032", border: "1px solid #1f3248",
                                   borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px",
                                 }}
                               >
-                                <option value="EXT" style={{ background: "#122032", color: "#cbd5e1" }}>Extérieur</option>
-                                <option value="INT" style={{ background: "#122032", color: "#cbd5e1" }}>Intérieur (mitoyen)</option>
-                                <option value="LNC" style={{ background: "#122032", color: "#cbd5e1" }}>Local Non Chauffé (LNC)</option>
+                                <option value="AUTO" style={{ background: "#122032", color: "#cbd5e1" }}>Auto (2 pièces = LNC, 1 = EXT)</option>
+                                <option value="EXT" style={{ background: "#122032", color: "#cbd5e1" }}>Extérieur forcé</option>
+                                <option value="INT" style={{ background: "#122032", color: "#cbd5e1" }}>Intérieur (Ignoré)</option>
+                                <option value="LNC" style={{ background: "#122032", color: "#cbd5e1" }}>LNC forcé</option>
                               </select>
                             </div>
 
