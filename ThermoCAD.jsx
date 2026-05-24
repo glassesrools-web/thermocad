@@ -374,7 +374,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const keyInputRef = useRef(null);
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const isPanningRef = useRef(false);
+  const isSpacePanRef = useRef(false);
 
   const [bgImage, setBgImage] = useState(null);
   const [bgScale, setBgScale] = useState(1);
@@ -563,8 +565,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     const scaleX = cvs.current.width / r.width;
     const scaleY = cvs.current.height / r.height;
     const s = getSnap(
-      (e.clientX - r.left) * scaleX - pan.x,
-      (e.clientY - r.top)  * scaleY - pan.y
+      ((e.clientX - r.left) * scaleX - pan.x) / zoom,
+      ((e.clientY - r.top)  * scaleY - pan.y) / zoom
     );
     setSp(s);
     if (poly.length > 0 && s) {
@@ -579,15 +581,15 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         setInfo(closing ? "🟢 Cliquer pour fermer la pièce" : `📏 ${len.toFixed(2)} m   ${ang}°`);
       }
     } else { setInfo(""); }
-  }, [getSnap, poly, keyInput, pan]);
+  }, [getSnap, poly, keyInput, pan, zoom]);
 
   const onClick = useCallback((e) => {
     if (e.detail > 1) return;
     const rect = cvs.current.getBoundingClientRect();
     const scaleX = cvs.current.width / rect.width;
     const scaleY = cvs.current.height / rect.height;
-    const px = (e.clientX - rect.left) * scaleX - pan.x;
-    const py = (e.clientY - rect.top)  * scaleY - pan.y;
+    const px = ((e.clientX - rect.left) * scaleX - pan.x) / zoom;
+    const py = ((e.clientY - rect.top)  * scaleY - pan.y) / zoom;
     let s = getSnap(px, py);
 
     if (mode === "select") {
@@ -704,7 +706,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         }
       }
     }
-  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, pan]);
+  }, [mode, poly, walls, doors, wins, getSnap, getSnapshot, pushUndo, keyInput, applyKeyLength, globalHeight, pan, zoom]);
 
   const deleteSelected = useCallback(() => {
     if (!selected) return;
@@ -831,6 +833,30 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   useEffect(() => {
     const canvas = cvs.current;
     if (!canvas) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+      setZoom(prevZ => {
+        const newZ = Math.min(10, Math.max(0.1, prevZ * factor));
+        setPan(prevP => ({
+          x: mouseX - (mouseX - prevP.x) * (newZ / prevZ),
+          y: mouseY - (mouseY - prevP.y) * (newZ / prevZ),
+        }));
+        return newZ;
+      });
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, []);
+
+  useEffect(() => {
+    const canvas = cvs.current;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
 
@@ -839,6 +865,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     ctx.save();
     ctx.translate(pan.x, pan.y);
+    ctx.scale(zoom, zoom);
 
     if (bgImage) {
       ctx.save();
@@ -894,6 +921,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
     wallsEnriched.forEach(w => {
       const isSel = selected?.id === w.id && selected?.type === "wall";
+      const isMultiSel = multiSelected.has(w.id);
+      const ownerCount = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+      const effectiveContact = w.contactOverride && w.contactOverride !== "AUTO"
+        ? w.contactOverride
+        : ownerCount >= 2 ? "LNC" : "EXT";
+      const isLNC = effectiveContact === "LNC";
+      const isINT = effectiveContact === "INT";
+      const baseColor = isINT ? "#3a5570" : isLNC ? "#f59e0b" : "#a8c0d8";
       if (isSel) {
         ctx.save();
         ctx.strokeStyle = "rgba(251,191,36,0.14)"; ctx.lineWidth = WW + 18; ctx.lineCap = "round";
@@ -901,7 +936,14 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
         ctx.restore();
       }
-      ctx.strokeStyle = isSel ? "#fbbf24" : "#a8c0d8";
+      if (isMultiSel && !isSel) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(192,132,252,0.18)"; ctx.lineWidth = WW + 14; ctx.lineCap = "round";
+        ctx.shadowColor = "#c084fc"; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.strokeStyle = isSel ? "#fbbf24" : isMultiSel ? "#c084fc" : baseColor;
       ctx.lineWidth = isSel ? WW + 2 : WW;
       ctx.lineCap = "square"; ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
@@ -1091,7 +1133,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     } else {
       ctx.restore(); 
     }
-  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, canvasSize]);
+  }, [walls, wallsEnriched, doors, wins, rooms, roomsEnriched, poly, sp, selected, multiSelected, keyInput, showGrid, showDimensions, bgImage, bgScale, bgOpacity, bgOffsetX, bgOffsetY, pan, zoom, canvasSize]);
 
   const exportSVG = useCallback(() => {
     let s = '<svg viewBox="0 0 840 660" xmlns="http://www.w3.org/2000/svg">';
