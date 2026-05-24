@@ -1038,11 +1038,17 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
     }
     const data = [
       ...wallsEnriched.map((w) => {
+        const ownerCount = rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length;
+        // Resolve contact: explicit override wins, then auto-detect from owner count
+        const effectiveContact = w.contactOverride && w.contactOverride !== "AUTO"
+          ? w.contactOverride
+          : ownerCount >= 2 ? "LNC" : "EXT";
         const ownerRoom = rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null;
         return {
           id: `cad-wall-${w.id}`,
           group: "vertical",
-          elementType: "Mur Extérieur",
+          elementType: effectiveContact === "LNC" ? "Mur LNC" : "Mur Extérieur",
+          contact: effectiveContact,
           width: w.length,
           height: w.height || DEFAULT_H,
           area: w.netArea,
@@ -1051,7 +1057,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           psi: 0.45,
           // DTR C3.2 default — Double paroi brique (10+air+10)
           composition: DTR_DEFAULT_WALL_PRESET,
-          uValue: DTR_DEFAULT_WALL_U,
+          uValue: w.rValue != null ? undefined : DTR_DEFAULT_WALL_U,
+          rValue: w.rValue ?? undefined,
           isolantMat:       w.isolantMat       || "aucun",
           isolantEpaisseur: w.isolantEpaisseur || 0.05,
           roomId:   ownerRoom ? ownerRoom.id   : null,
@@ -1062,14 +1069,20 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         const dw = d.width || DEFAULT_DOOR_W;
         const dh = d.height || DEFAULT_DOOR_H;
         const w = walls.find(wl => wl.id === d.wid);
+        const ownerCount = w ? rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length : 0;
+        const contact = ownerCount >= 2 ? "LNC" : "EXT";
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
+        // Resolve U: use stored doorMat if set, else DTR default for bois 3.2cm (K=3.36)
+        const uValue = d.uValue ?? gKP(d.doorMat || DTR_DEFAULT_DOOR_MAT, contact === "LNC" ? "lnc" : "exterieur") || 3.36;
         return {
           id: `cad-door-${d.id}`,
           group: "vertical",
           elementType: "Porte",
+          contact,
           width: dw,
           height: dh,
           area: dw * dh,
+          uValue,
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: (2 * dh) + dw,
           psi: 0.10,
@@ -1081,14 +1094,26 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
         const vw = wv.width || DEFAULT_WIN_W;
         const vh = wv.height || DEFAULT_WIN_H;
         const w = walls.find(wl => wl.id === wv.wid);
+        const ownerCount = w ? rooms.filter(rm => (rm.wallIds || []).includes(w.id)).length : 0;
+        const contact = ownerCount >= 2 ? "LNC" : "EXT";
         const ownerRoom = w ? (rooms.find(rm => (rm.wallIds || []).includes(w.id)) ?? null) : null;
+        // Resolve U from stored vitrage params or DTR default (double 10-11mm bois → 3.0)
+        const uValue = wv.uValue
+          ?? safeNum(gKV(
+              wv.winType  || DTR_DEFAULT_WIN_TYPE,
+              wv.winLame  || DTR_DEFAULT_WIN_LAME,
+              wv.winCadre || DTR_DEFAULT_WIN_CADRE,
+             ))
+          ?? 3.0;
         return {
           id: `cad-win-${wv.id}`,
           group: "vertical",
           elementType: "Fenêtre",
+          contact,
           width: vw,
           height: vh,
           area: vw * vh,
+          uValue,
           orientation: w ? getOrientation(w.x1, w.y1, w.x2, w.y2) : "N",
           bridgeLength: 2 * (vw + vh),
           psi: 0.10,
@@ -1105,7 +1130,11 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           id: `cad-floor-${rm.id}`,
           group: "floor",
           elementType: "Plancher (" + rm.name + ")",
+          contact: "SOL",
           area: rm.area || 0,
+          perimetre: parseFloat(perim.toFixed(2)),
+          z: 0,
+          type_iso: "sans_iso",
           composition: DTR_DEFAULT_FLOOR_PRESET,
           uValue: DTR_DEFAULT_FLOOR_U,
           bridgeLength: parseFloat(perim.toFixed(2)),
@@ -1122,6 +1151,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           id: `cad-roof-${rm.id}`,
           group: "roof",
           elementType: "Toiture (" + rm.name + ")",
+          contact: "EXT",
           area: rm.area || 0,
           composition: DTR_DEFAULT_ROOF_PRESET,
           uValue: DTR_DEFAULT_ROOF_U,

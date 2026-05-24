@@ -24,27 +24,33 @@ const RS = {
   descendant_lnc: 0.34,
 };
 
-/** DTR C3.2 Table 2.1 — Reference U-values [a,b,c,d,e] by building type and zone */
+/** DTR C3.2 Tableau 2.1 — Reference transmission coefficients Dref
+ *  Shape: { buildingType: { zone: [a_S1, b_S2, c_S3, d_S4, e_S5] } }
+ *  Dref = a*S1 + b*S2 + c*S3 + d*S4 + e*S5
+ *  Source: DTR C3.2 Tableau 2.1 (corrected — confirmed by PFC thesis p.24)
+ */
 const DREF_T = {
   individuel: {
-    A:  [1.10, 2.40, 1.40, 3.50, 4.50],
-    B:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    Bp: [1.10, 2.40, 1.20, 3.50, 4.50],
-    C:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    D:  [2.40, 3.40, 1.40, 3.50, 4.50],
-    Dp: [2.40, 3.40, 1.40, 3.50, 4.50],
-    E:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    E1: [1.10, 2.40, 1.20, 3.50, 4.50],
+    A:  [0.9, 2, 1.2, 3, 3.8],
+    A1: [0.9, 2, 1.2, 3, 3.8],
+    B:  [0.9, 2, 1.0, 3, 3.8],
+    Bp: [0.9, 2, 1.0, 3, 3.8],
+    C:  [0.9, 2, 1.0, 3, 3.8],
+    D:  [0.9, 2, 1.2, 3, 3.8],
+    Dp: [0.9, 2, 1.2, 3, 3.8],
+    E:  [0.9, 2, 1.0, 3, 3.8],
+    E1: [0.9, 2, 1.0, 3, 3.8],
   },
   collectif: {
-    A:  [1.10, 2.40, 1.20, 3.50, 4.50],
-    B:  [0.90, 2.40, 1.20, 3.50, 4.50],
-    Bp: [0.90, 2.40, 1.20, 3.50, 4.50],
-    C:  [0.85, 2.40, 1.20, 3.50, 4.50],
-    D:  [2.40, 3.40, 1.40, 3.50, 4.50],
-    Dp: [2.40, 3.40, 1.40, 3.50, 4.50],
-    E:  [0.85, 2.40, 1.20, 3.50, 4.50],
-    E1: [0.85, 2.40, 1.20, 3.50, 4.50],
+    A:  [0.9,  2, 1.2, 3, 3.8],
+    A1: [0.9,  2, 1.2, 3, 3.8],
+    B:  [0.75, 2, 1.0, 3, 3.8],
+    Bp: [0.75, 2, 1.0, 3, 3.8],
+    C:  [0.75, 2, 1.0, 3, 3.8],
+    D:  [0.9,  2, 1.2, 3, 3.8],
+    Dp: [0.9,  2, 1.2, 3, 3.8],
+    E:  [0.75, 2, 1.0, 3, 3.8],
+    E1: [0.75, 2, 1.0, 3, 3.8],
   },
 };
 
@@ -307,7 +313,13 @@ export function calculateRoomLosses(project, room) {
   const Qv = rho_cp * infiltration * volume; // [W/K]
 
   // ── Correction factor Cin ────────────────────────────────────────────────
-  const Cin = 1.2; // DTR default (continuous operation, moderate inertia)
+  // DTR §2.9: cin applies ONLY to discontinuous heating.
+  // Continuous heating → cin = 0 (no intermittency surcharge).
+  const mode_chauf = project?.info?.mode_chauf ?? "continu";
+  const inertie    = project?.info?.inertie    ?? "forte";
+  const Cin = mode_chauf === "discontinu"
+    ? (inertie === "forte" ? 1.20 : 1.15)
+    : 0; // continu — no intermittency correction
 
   // ── Dref conformity check ────────────────────────────────────────────────
   const drefCoefs = (DREF_T[buildType] ?? DREF_T.collectif)[zoneKey] ?? [1.10, 2.40, 1.20, 3.50, 4.50];
@@ -317,8 +329,12 @@ export function calculateRoomLosses(project, room) {
   const reg_ok = Dref > 0 ? DT <= 1.05 * Dref : null;
 
   // ── Design heat load ─────────────────────────────────────────────────────
-  const Q_total = dT > 0 ? (DT + DR) * dT * Cin : 0;
-  const DB      = (DT + DR) * dT;
+  // Guard: if DeltaT=0 (indoor=outdoor), heat load is zero — avoid ×0 artifacts.
+  const DeltaT  = dT;
+  const Q_total = DeltaT > 0
+    ? (DT + DR) * DeltaT * (1 + Cin)
+    : 0;
+  const DB      = DeltaT > 0 ? (DT + DR) * DeltaT : 0;
 
   return {
     Qt:       f4(Qt),

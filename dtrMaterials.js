@@ -185,5 +185,5 @@ export const ISOLANT_OPTS = [
   { val: "laine_de_roche",       label: "Laine de roche",                       lambda: 0.038 },
   { val: "laine_de_verre",       label: "Laine de verre",                       lambda: 0.040 },
   { val: "liege",                label: "Liège",                                lambda: 0.040 },
-  { val: "polyurethane",         label: "Mousse de Polyuréthane (PUR)",         lambda: 0.025 },
+  { val: "polyurethane",         label: "Mousse de Polyuréthane (PUR)",         lambda: 0.031 },
 ];

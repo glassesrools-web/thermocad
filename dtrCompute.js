@@ -67,7 +67,19 @@ export const gTBE_detail = (zone, altitude) => {
 };
 
 export const gKV = (type, lame, cadre) => { if (type === "simple") return KVN_T.simple[cadre] || 5.0; if (type === "dp30") return KVN_T.dp30[cadre] || 2.6; const k = lame <= 7 ? "d5" : lame <= 9 ? "d8" : lame <= 11 ? "d10" : "d12"; return KVN_T[k][cadre] || 2.9; };
-export const gEV = (H, r) => { const e = EV_T[r] || EV_T.IV; for (const [h, v] of e) if (H <= h) return v; return e[e.length - 1][1]; };
+export const gEV = (H, roughness) => {
+  const e = EV_T[roughness] || EV_T.IV;
+  if (H <= e[0][0]) return e[0][1];
+  if (H >= e[e.length - 1][0]) return e[e.length - 1][1];
+  for (let i = 0; i < e.length - 1; i++) {
+    const [h0, v0] = e[i];
+    const [h1, v1] = e[i + 1];
+    if (H >= h0 && H <= h1) {
+      return f4(v0 + (v1 - v0) * ((H - h0) / (h1 - h0)));
+    }
+  }
+  return e[e.length - 1][1];
+};
 export const gKS = z => { for (const [lo, hi, ks] of KS52) if (z >= lo && z < hi) return ks; return 0; };
 export const rCol53 = r => r < 0.40 ? 0 : r < 0.60 ? 1 : r < 0.80 ? 2 : r < 1.05 ? 3 : r < 1.55 ? 4 : r < 2.05 ? 5 : 6;
 export const gKS53 = (z, r) => { for (const [lo, hi, ks] of KS53) if (z >= lo && z < hi) return ks[rCol53(r)]; return 0; };
@@ -294,13 +306,25 @@ export function compute(st) {
   const Qv = f2(Math.max(0.6 * Vh, Qvref));
   // ─────────────────────────────────────────────────────────────────
   // 13. تسرب الريح Qs
+  // DTR §7.3: Qs = (Σ Po_j × A_j) × √EV / 2
+  // Group by roughness+height so √EV is applied correctly per group.
   // ─────────────────────────────────────────────────────────────────
   let Qs = 0;
+  const evGroups = new Map();
   for (const o of (st.ouvrants_vent || [])) {
     const A = n(o.surface);
     if (!A) continue;
-    Qs += (PO_T[o.type] || 4.0) * A * gEV(n(o.H) || 4, o.rugosite || "IV");
+    const po  = PO_T[o.type] || 4.0;
+    const H   = n(o.H) || 4;
+    const rug = o.rugosite || "IV";
+    const key = `${rug}|${H}`;
+    if (!evGroups.has(key)) evGroups.set(key, { po_A: 0, H, rug });
+    evGroups.get(key).po_A += po * A;
   }
+  for (const { po_A, H, rug } of evGroups.values()) {
+    Qs += po_A * Math.sqrt(gEV(H, rug));
+  }
+  Qs = f2(Qs / 2); // ÷2 per DTR §7.3
   const DR = f4(0.34 * (Qv + Qs));
   const DRv = f4(0.34 * Qv);
   const DRs = f4(0.34 * Qs);
@@ -309,12 +333,12 @@ export function compute(st) {
   // ─────────────────────────────────────────────────────────────────
   const CR = { individuel: 0, central_tout_isole: 0.05, central_partiel: 0.10, central_non_isole: 0.20 };
   const cr = CR[st.type_chauf] ?? 0.10;
-  let cin = 0.10;
+  // DTR §2.9: cin applies ONLY to discontinuous heating.
+  // Continuous heating → cin = 0 (no intermittency surcharge).
+  let cin = 0;
   if (st.mode_chauf === "discontinu") {
     if (st.inertie === "forte") cin = 0.20;
     else cin = 0.15;
-  } else {
-    cin = 0.10;
   }
   // ─────────────────────────────────────────────────────────────────
   // 15. الاستطاعة الحرارية النهائية Q
