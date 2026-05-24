@@ -266,6 +266,78 @@ function StatRow({ label, val, col, sub }) {
   );
 }
 
+function MultiWallEditor({ wallIds, walls, rooms, setWalls, getSnapshot, pushUndo, WALL_R_PRESETS, ISOLANT_OPTS, DTR_DEFAULT_WALL_PRESET, S }) {
+  const [batchContact, setBatchContact] = useState("NO_CHANGE");
+  const [batchIsolant, setBatchIsolant] = useState("NO_CHANGE");
+  const [batchEpaisseur, setBatchEpaisseur] = useState("");
+  const [batchPreset, setBatchPreset] = useState("NO_CHANGE");
+
+  const applyBatch = () => {
+    const snap = getSnapshot(); pushUndo(snap);
+    setWalls(prev => prev.map(w => {
+      if (!wallIds.has(w.id)) return w;
+      let next = { ...w };
+      if (batchContact !== "NO_CHANGE") next.contactOverride = batchContact;
+      if (batchIsolant !== "NO_CHANGE") next.isolantMat = batchIsolant;
+      if (batchIsolant !== "NO_CHANGE" && batchIsolant !== "aucun" && batchEpaisseur !== "") {
+        const ep = parseFloat(batchEpaisseur);
+        if (!isNaN(ep) && ep > 0) next.isolantEpaisseur = ep;
+      }
+      if (batchPreset !== "NO_CHANGE") {
+        const i = parseInt(batchPreset, 10);
+        const preset = WALL_R_PRESETS[i];
+        if (preset) {
+          next.composition = i;
+          if (preset.R !== null) next.rValue = preset.R;
+        }
+      }
+      return next;
+    }));
+  };
+
+  const selStyle = { width: "100%", background: "#122032", border: "1px solid #1f3248", borderRadius: 4, color: "#cbd5e1", fontSize: 11, padding: "4px 6px", marginBottom: 6 };
+
+  return (
+    <div style={{ background: "#0c1a28", borderRadius: 8, padding: "10px 12px", border: "1px solid #1a3050" }}>
+      <div style={{ color: "#c084fc", fontSize: 13, fontWeight: "700", marginBottom: 10 }}>
+        🧱 Édition groupée — {wallIds.size} murs sélectionnés
+      </div>
+      <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 3 }}>Type de contact</div>
+      <select value={batchContact} onChange={e => setBatchContact(e.target.value)} style={selStyle}>
+        <option value="NO_CHANGE">— Ne pas modifier —</option>
+        <option value="AUTO">Auto</option>
+        <option value="EXT">Extérieur forcé</option>
+        <option value="LNC">LNC forcé</option>
+        <option value="INT">Intérieur (ignoré)</option>
+      </select>
+      <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 3 }}>Isolation</div>
+      <select value={batchIsolant} onChange={e => setBatchIsolant(e.target.value)} style={selStyle}>
+        <option value="NO_CHANGE">— Ne pas modifier —</option>
+        {ISOLANT_OPTS.map(o => <option key={o.val} value={o.val}>{o.label}</option>)}
+      </select>
+      {batchIsolant !== "NO_CHANGE" && batchIsolant !== "aucun" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <span style={{ color: "#3a5570", fontSize: 10 }}>Épaisseur:</span>
+          <input type="number" min="0.01" max="0.5" step="0.01" value={batchEpaisseur}
+            onChange={e => setBatchEpaisseur(e.target.value)}
+            placeholder="ex: 0.08"
+            style={{ width: 70, background: "#08101a", border: "1px solid #1a2d40", borderRadius: 4, color: "#fbbf24", fontSize: 11, padding: "2px 4px", textAlign: "center" }}
+          />
+          <span style={{ color: "#3a5570", fontSize: 10 }}>m</span>
+        </div>
+      )}
+      <div style={{ color: "#4a6a8a", fontSize: 10, marginBottom: 3 }}>Matériau (DTR C3.2)</div>
+      <select value={batchPreset} onChange={e => setBatchPreset(e.target.value)} style={selStyle}>
+        <option value="NO_CHANGE">— Ne pas modifier —</option>
+        {WALL_R_PRESETS.map((p, i) => <option key={i} value={i}>{p.label_fr}</option>)}
+      </select>
+      <button onClick={applyBatch} style={{ marginTop: 8, width: "100%", background: "#1a3a60", border: "1px solid #2a5080", borderRadius: 6, color: "#60a5fa", fontWeight: "700", fontSize: 12, padding: "7px 0", cursor: "pointer" }}>
+        ✓ Appliquer aux {wallIds.size} murs
+      </button>
+    </div>
+  );
+}
+
 export default function ThermoCAD({ onExportSurfaces } = {}) {
   const cvs = useRef(null);
   const cvsWrapRef = useRef(null); // canvas container — watched by ResizeObserver
@@ -290,6 +362,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
   const [keyInput, setKeyInput] = useState("");
 
   const [selected, setSelected] = useState(null);
+  const [multiSelected, setMultiSelected] = useState(new Set());
   const [globalHeight, setGlobalHeight] = useState(DEFAULT_H);
   const [showGrid, setShowGrid] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
@@ -537,6 +610,19 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           if (dist({ x: px, y: py }, pt) < WW + 8) { hit = { type: "wall", id: w.id }; break; }
         }
       }
+      // Ctrl+Click: toggle wall into multi-selection (walls only)
+      if (e.ctrlKey && hit && hit.type === "wall") {
+        setMultiSelected(prev => {
+          const next = new Set(prev);
+          if (next.has(hit.id)) { next.delete(hit.id); } else { next.add(hit.id); }
+          return next;
+        });
+        setSelected(hit);
+        setActiveTab("props");
+        return;
+      }
+      // Normal click: clear multi-selection
+      setMultiSelected(new Set());
       setSelected(hit);
       setActiveTab("props");
       return;
@@ -1208,6 +1294,7 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
                   setPoly([]);
                   setKeyInput("");
                   setSelected(null);
+                  setMultiSelected(new Set());
                   polyWallIds.current = [];
                 }}
                 style={{
@@ -1753,7 +1840,20 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
             {activeTab === "props" && (
               <div>
                 <div style={S.label}>✏️ Propriétés</div>
-                {!selected ? (
+                {multiSelected.size > 1 ? (
+                  <MultiWallEditor
+                    wallIds={multiSelected}
+                    walls={walls}
+                    rooms={rooms}
+                    setWalls={setWalls}
+                    getSnapshot={getSnapshot}
+                    pushUndo={pushUndo}
+                    WALL_R_PRESETS={WALL_R_PRESETS}
+                    ISOLANT_OPTS={ISOLANT_OPTS}
+                    DTR_DEFAULT_WALL_PRESET={DTR_DEFAULT_WALL_PRESET}
+                    S={S}
+                  />
+                ) : !selected ? (
                   <div style={{ color: "#1e3050", fontSize: 12, textAlign: "center", padding: "20px 0" }}>
                     Passez en mode Modifier puis cliquez sur un élément
                   </div>
