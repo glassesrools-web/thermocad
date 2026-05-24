@@ -12,12 +12,12 @@ import {
   gKP,
 } from "./dtrMaterials.js";
 
-// Local DTR-C3.2 default values (match dtrMaterials.js keys)
-const DTR_DEFAULT_WALL_PRESET = "db_brique_10_air_10";
+// Local DTR-C3.2 default values (match dtrMaterials.js array indexes)
+const DTR_DEFAULT_WALL_PRESET = 14;
 const DTR_DEFAULT_WALL_U      = 1.28;
-const DTR_DEFAULT_ROOF_PRESET = "terrasse_isol_8cm";
+const DTR_DEFAULT_ROOF_PRESET = 14;
 const DTR_DEFAULT_ROOF_U      = 0.48;
-const DTR_DEFAULT_FLOOR_PRESET = "dalle_pleine_15cm";
+const DTR_DEFAULT_FLOOR_PRESET = 4;
 const DTR_DEFAULT_FLOOR_U     = 2.70;
 const DTR_DEFAULT_WIN_TYPE    = "double";
 const DTR_DEFAULT_WIN_LAME    = "10_11";
