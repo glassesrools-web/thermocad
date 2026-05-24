@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  PRESETS_MURS,
-  PRESETS_TOITURES,
-  PRESETS_PLANCHERS,
+  WALL_R_PRESETS,
+  ROOF_R_PRESETS,
+  FLOOR_R_PRESETS,
   VITRAGE_OPTS,
   LAME_OPTS,
   CADRE_OPTS,
