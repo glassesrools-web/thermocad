@@ -187,3 +187,24 @@ export const ISOLANT_OPTS = [
   { val: "liege",                label: "Liège",                                lambda: 0.040 },
   { val: "polyurethane",         label: "Mousse de Polyuréthane (PUR)",         lambda: 0.025 },
 ];
+
+// ─── Aliases for the R-value paradigm (used by ThermoCAD and RoomEditor) ────
+// Maps the old {val, label, u} shape to the new {label_fr, R} shape.
+// R = 1/u (rounded to 3 dp). R = null means manual entry.
+export const WALL_R_PRESETS = PRESETS_MURS.map(p => ({
+  label_fr: p.label,
+  R: p.u !== "" && p.u !== null ? parseFloat((1 / p.u).toFixed(3)) : null,
+  U: p.u !== "" && p.u !== null ? p.u : null,
+}));
+
+export const ROOF_R_PRESETS = PRESETS_TOITURES.map(p => ({
+  label_fr: p.label,
+  R: p.u !== "" && p.u !== null ? parseFloat((1 / p.u).toFixed(3)) : null,
+  U: p.u !== "" && p.u !== null ? p.u : null,
+}));
+
+export const FLOOR_R_PRESETS = PRESETS_PLANCHERS.map(p => ({
+  label_fr: p.label,
+  R: p.u !== "" && p.u !== null ? parseFloat((1 / p.u).toFixed(3)) : null,
+  U: p.u !== "" && p.u !== null ? p.u : null,
+}));
