@@ -96,7 +96,7 @@ const KS58 = [
 ];
 
 // DTR §3.2 — fallback base temperatures by zone
-const ZONE_BASE_TEMP = { A: 4, B: 2, Bp: 2, C: -2, D: 5, Dp: 5, E: 6, E1: 6 };
+const ZONE_BASE_TEMP = { A: 3, A1: 1, B: 4, Bp: 4, C: -2, D: 7, Dp: 5 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INTERNAL HELPERS

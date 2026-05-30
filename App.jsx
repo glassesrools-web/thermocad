@@ -261,7 +261,7 @@ export default function App() {
     return !results || totalVolume <= 0 ? 0 : Number(results.Q_design_W ?? 0) / totalVolume;
   }, [project.locals, results]);
 
-  const handlePrintReport = useReactToPrint({ content: () => reportRef.current, documentTitle: `ThermoCalc_Rapport_${project.info?.name ?? "Projet"}` });
+  const [handlePrintReport] = useReactToPrint({ contentRef: reportRef, documentTitle: `ThermoCalc_Rapport_${project.info?.name ?? "Projet"}` });
 
   if (currentView === "menu") {
     return (
