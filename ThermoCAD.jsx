@@ -302,6 +302,9 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
 
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const isPanningRef = useRef(false);
+  const isSpacePanRef = useRef(false);
+
+  const [multiSelected, setMultiSelected] = useState(new Set());
 
   const [bgImage, setBgImage] = useState(null);
   const [bgScale, setBgScale] = useState(1);
@@ -537,6 +540,19 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
           if (dist({ x: px, y: py }, pt) < WW + 8) { hit = { type: "wall", id: w.id }; break; }
         }
       }
+      if (e.ctrlKey && hit && hit.type === "wall") {
+        setMultiSelected(prev => {
+          const next = new Set(prev);
+          if (next.has(hit.id)) { next.delete(hit.id); } else { next.add(hit.id); }
+          // If only one remains after toggle, keep it as the active single selection
+          if (next.size === 1) setSelected({ type: "wall", id: [...next][0] });
+          else setSelected(null);
+          return next;
+        });
+        setActiveTab("props");
+        return;
+      }
+      setMultiSelected(new Set());
       setSelected(hit);
       setActiveTab("props");
       return;
@@ -1490,8 +1506,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
             onMouseMove={onMove}
             onClick={onClick}
             onDoubleClick={() => { setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = []; }}
-            onContextMenu={(e) => e.preventDefault()}
-            style={{ display: "block", cursor: mode === "select" ? "default" : "crosshair" }}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            style={{ display: "block", cursor: isPanningRef.current ? "grabbing" : isSpacePanRef.current ? "grab" : mode === "select" ? "default" : "crosshair" }}
           />
         </div>
 
