@@ -1490,8 +1490,8 @@ export default function ThermoCAD({ onExportSurfaces } = {}) {
             onMouseMove={onMove}
             onClick={onClick}
             onDoubleClick={() => { setPoly([]); setInfo(""); setKeyInput(""); polyWallIds.current = []; }}
-            onContextMenu={(e) => e.preventDefault()}
-            style={{ display: "block", cursor: mode === "select" ? "default" : "crosshair" }}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            style={{ display: "block", cursor: isPanningRef.current ? "grabbing" : isSpacePanRef.current ? "grab" : mode === "select" ? "default" : "crosshair" }}
           />
         </div>
 
